@@ -1,4 +1,6 @@
 const Fastify = require("fastify");
+const { basename, extname } = require("node:path");
+const { openAsBlob } = require("node:fs");
 
 const LOCAL_AGENT_PORT = 45888;
 
@@ -16,6 +18,55 @@ async function startLocalAgent(initial = {}) {
 
   function baseUrl() {
     return config.serverBaseUrl.replace(/\/$/, "");
+  }
+
+  function guessMimeType(filePath, fallbackKind) {
+    const ext = extname(filePath).toLowerCase();
+    const known = {
+      ".png": "image/png",
+      ".jpg": "image/jpeg",
+      ".jpeg": "image/jpeg",
+      ".gif": "image/gif",
+      ".webp": "image/webp",
+      ".bmp": "image/bmp",
+      ".mp4": "video/mp4",
+      ".mov": "video/quicktime",
+      ".webm": "video/webm",
+      ".mkv": "video/x-matroska",
+      ".mp3": "audio/mpeg",
+      ".wav": "audio/wav",
+      ".ogg": "audio/ogg",
+      ".m4a": "audio/mp4",
+      ".aac": "audio/aac",
+      ".pdf": "application/pdf",
+      ".txt": "text/plain",
+      ".json": "application/json",
+      ".zip": "application/zip"
+    };
+    if (known[ext]) return known[ext];
+    if (fallbackKind === "image") return "image/*";
+    if (fallbackKind === "video") return "video/*";
+    if (fallbackKind === "audio") return "audio/*";
+    return "application/octet-stream";
+  }
+
+  async function uploadAttachment(body, kind) {
+    const fileName = body.fileName ?? basename(body.filePath);
+    const mimeType = body.mimeType ?? guessMimeType(body.filePath, kind);
+    const blob = await openAsBlob(body.filePath, { type: mimeType });
+    const form = new FormData();
+    form.append("file", blob, fileName);
+    form.append("kind", kind);
+    const response = await fetch(`${baseUrl()}/api/upload/attachment`, {
+      method: "POST",
+      body: form
+    });
+    const payload = await response.json();
+    return {
+      ...payload,
+      durationMs: body.durationMs,
+      thumbnailUrl: body.thumbnailUrl
+    };
   }
 
   function defaultAgentFromConfig() {
@@ -133,6 +184,78 @@ async function startLocalAgent(initial = {}) {
         deviceId: agent.agentDeviceId,
         conversationId: agent.conversationId,
         text: request.body?.text
+      })
+    });
+    return response.json();
+  });
+  localAgent.post("/api/v1/agents/:agentId/messages/audio", async (request, reply) => {
+    const agent = ensureRegisteredAgent(request.params.agentId);
+    if (!agent) {
+      return reply.code(404).send({ message: "agent not registered locally" });
+    }
+    const uploaded = await uploadAttachment(request.body, "audio");
+    const response = await fetch(`${baseUrl()}/api/messages/attachment`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deviceId: agent.agentDeviceId,
+        conversationId: agent.conversationId,
+        kind: "audio",
+        ...uploaded
+      })
+    });
+    return response.json();
+  });
+  localAgent.post("/api/v1/agents/:agentId/messages/image", async (request, reply) => {
+    const agent = ensureRegisteredAgent(request.params.agentId);
+    if (!agent) {
+      return reply.code(404).send({ message: "agent not registered locally" });
+    }
+    const uploaded = await uploadAttachment(request.body, "image");
+    const response = await fetch(`${baseUrl()}/api/messages/attachment`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deviceId: agent.agentDeviceId,
+        conversationId: agent.conversationId,
+        kind: "image",
+        ...uploaded
+      })
+    });
+    return response.json();
+  });
+  localAgent.post("/api/v1/agents/:agentId/messages/video", async (request, reply) => {
+    const agent = ensureRegisteredAgent(request.params.agentId);
+    if (!agent) {
+      return reply.code(404).send({ message: "agent not registered locally" });
+    }
+    const uploaded = await uploadAttachment(request.body, "video");
+    const response = await fetch(`${baseUrl()}/api/messages/attachment`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deviceId: agent.agentDeviceId,
+        conversationId: agent.conversationId,
+        kind: "video",
+        ...uploaded
+      })
+    });
+    return response.json();
+  });
+  localAgent.post("/api/v1/agents/:agentId/messages/file", async (request, reply) => {
+    const agent = ensureRegisteredAgent(request.params.agentId);
+    if (!agent) {
+      return reply.code(404).send({ message: "agent not registered locally" });
+    }
+    const uploaded = await uploadAttachment(request.body, "file");
+    const response = await fetch(`${baseUrl()}/api/messages/attachment`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        deviceId: agent.agentDeviceId,
+        conversationId: agent.conversationId,
+        kind: "file",
+        ...uploaded
       })
     });
     return response.json();
