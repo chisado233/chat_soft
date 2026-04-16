@@ -3,12 +3,13 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import websocket from "@fastify/websocket";
 import fastifyStatic from "@fastify/static";
-import { createWriteStream, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { nanoid } from "nanoid";
 import type {
   AgentInfo,
+  AttachmentPayload,
   ChatMessage,
   ClientToServerEvent,
   ConversationSummary,
@@ -37,6 +38,12 @@ type VoiceMessageBody = {
   mimeType: string;
   conversationId?: string;
 };
+
+type AttachmentMessageBody = {
+  deviceId: string;
+  conversationId?: string;
+  kind: "audio" | "image" | "video" | "file";
+} & AttachmentPayload;
 
 const app = Fastify({ logger: true });
 const dataDir = join(process.cwd(), "data");
@@ -160,6 +167,23 @@ function createVoiceMessage(body: VoiceMessageBody, messageId?: string): ChatMes
     mediaUrl: body.mediaUrl,
     durationMs: body.durationMs,
     mimeType: body.mimeType
+  };
+}
+
+function createAttachmentMessage(body: AttachmentMessageBody, messageId?: string): ChatMessage {
+  return {
+    id: messageId ?? nanoid(),
+    kind: body.kind,
+    conversationId: body.conversationId ?? DEFAULT_CONVERSATION_ID,
+    senderDeviceId: body.deviceId,
+    createdAt: new Date().toISOString(),
+    status: "delivered",
+    mediaUrl: body.mediaUrl,
+    mimeType: body.mimeType,
+    fileName: body.fileName,
+    fileSize: body.fileSize,
+    durationMs: body.durationMs,
+    thumbnailUrl: body.thumbnailUrl
   };
 }
 
@@ -288,6 +312,16 @@ app.post<{ Body: VoiceMessageBody }>("/api/messages/voice", async (request) => {
   return { ok: true, message };
 });
 
+app.post<{ Body: AttachmentMessageBody }>("/api/messages/attachment", async (request) => {
+  const db = loadDb();
+  const message = createAttachmentMessage(request.body);
+  appendMessage(db, message);
+  saveDb(db);
+  pushToAll({ type: "message.created", message });
+  pushToAll({ type: "message.status", messageId: message.id, status: "delivered" });
+  return { ok: true, message };
+});
+
 app.post("/api/upload/voice", async (request, reply) => {
   const file = await request.file();
   if (!file) {
@@ -302,6 +336,27 @@ app.post("/api/upload/voice", async (request, reply) => {
     mediaUrl: `/media/${filename}`,
     durationMs,
     mimeType: file.mimetype
+  };
+});
+
+app.post("/api/upload/attachment", async (request, reply) => {
+  const file = await request.file();
+  if (!file) {
+    return reply.code(400).send({ message: "缺少文件" });
+  }
+  const kind = String((file.fields.kind as { value?: string } | undefined)?.value ?? "file");
+  const originalName = file.filename || `${kind}-${Date.now()}`;
+  const ext = originalName.includes(".") ? originalName.slice(originalName.lastIndexOf(".") + 1) : "bin";
+  const filename = `${Date.now()}-${nanoid(8)}.${ext}`;
+  const filepath = join(mediaDir, filename);
+  await pipeline(file.file, createWriteStream(filepath));
+
+  const mimeType = file.mimetype || "application/octet-stream";
+  return {
+    mediaUrl: `/media/${filename}`,
+    mimeType,
+    fileName: originalName,
+    fileSize: statSync(filepath).size
   };
 });
 
@@ -363,6 +418,28 @@ app.register(async (wsApp) => {
             mediaUrl: event.mediaUrl,
             durationMs: event.durationMs,
             mimeType: event.mimeType
+          },
+          event.tempId
+        );
+        appendMessage(db, message);
+        saveDb(db);
+        pushToAll({ type: "message.created", message });
+        pushToAll({ type: "message.status", messageId: message.id, status: "delivered" });
+        return;
+      }
+
+      if (event.type === "message.send_attachment") {
+        const message = createAttachmentMessage(
+          {
+            deviceId: currentDeviceId,
+            conversationId: event.conversationId,
+            kind: event.kind,
+            mediaUrl: event.mediaUrl,
+            mimeType: event.mimeType,
+            fileName: event.fileName,
+            fileSize: event.fileSize,
+            durationMs: event.durationMs,
+            thumbnailUrl: event.thumbnailUrl
           },
           event.tempId
         );

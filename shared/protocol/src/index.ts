@@ -1,4 +1,4 @@
-export type MessageKind = "text" | "voice";
+export type MessageKind = "text" | "voice" | "audio" | "image" | "video" | "file";
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
 export type ConversationType = "direct" | "agent";
 export type AgentStatus = "online" | "offline";
@@ -24,7 +24,32 @@ export interface VoiceMessage extends BaseMessage {
   mimeType: string;
 }
 
-export type ChatMessage = TextMessage | VoiceMessage;
+export interface AttachmentPayload {
+  mediaUrl: string;
+  mimeType: string;
+  fileName: string;
+  fileSize: number;
+  durationMs?: number;
+  thumbnailUrl?: string;
+}
+
+export interface AudioMessage extends BaseMessage, AttachmentPayload {
+  kind: "audio";
+}
+
+export interface ImageMessage extends BaseMessage, AttachmentPayload {
+  kind: "image";
+}
+
+export interface VideoMessage extends BaseMessage, AttachmentPayload {
+  kind: "video";
+}
+
+export interface FileMessage extends BaseMessage, AttachmentPayload {
+  kind: "file";
+}
+
+export type ChatMessage = TextMessage | VoiceMessage | AudioMessage | ImageMessage | VideoMessage | FileMessage;
 
 export interface DeviceInfo {
   deviceId: string;
@@ -79,6 +104,13 @@ export interface SendVoiceEvent {
   mimeType: string;
 }
 
+export interface SendAttachmentEvent extends AttachmentPayload {
+  type: "message.send_attachment";
+  conversationId: string;
+  tempId: string;
+  kind: "audio" | "image" | "video" | "file";
+}
+
 export interface MessageCreatedEvent {
   type: "message.created";
   message: ChatMessage;
@@ -113,6 +145,7 @@ export type ClientToServerEvent =
   | HelloEvent
   | SendTextEvent
   | SendVoiceEvent
+  | SendAttachmentEvent
   | SyncPullEvent
   | MarkReadEvent;
 

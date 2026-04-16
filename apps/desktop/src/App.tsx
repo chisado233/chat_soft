@@ -1,10 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ChatClient } from "@chat-soft/core";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { ChatClient, createId } from "@chat-soft/core";
 import type { ChatMessage, DeviceInfo } from "@chat-soft/protocol";
 
 function formatMessage(message: ChatMessage) {
   if (message.kind === "text") return message.text;
-  return `[语音] ${Math.round(message.durationMs / 1000)} 秒`;
+  if (message.kind === "voice") return `[语音] ${Math.round(message.durationMs / 1000)} 秒`;
+  if (message.kind === "audio") return `[音频] ${message.fileName}`;
+  if (message.kind === "image") return `[图片] ${message.fileName}`;
+  if (message.kind === "video") return `[视频] ${message.fileName}`;
+  return `[文件] ${message.fileName}`;
+}
+
+function renderMessageBody(message: ChatMessage) {
+  if (message.kind === "text") {
+    return <p>{message.text}</p>;
+  }
+  if (message.kind === "voice" || message.kind === "audio") {
+    return <audio controls preload="metadata" src={message.mediaUrl}></audio>;
+  }
+  if (message.kind === "image") {
+    return (
+      <a href={message.mediaUrl} target="_blank" rel="noreferrer">
+        <img className="message-image" src={message.mediaUrl} alt={message.fileName} />
+      </a>
+    );
+  }
+  if (message.kind === "video") {
+    return <video className="message-video" controls preload="metadata" src={message.mediaUrl}></video>;
+  }
+  return (
+    <a href={message.mediaUrl} target="_blank" rel="noreferrer" className="file-link">
+      {message.fileName}
+    </a>
+  );
 }
 
 export function App({ platform }: { platform: DeviceInfo["platform"] }) {
@@ -13,14 +41,16 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
+  const [pickerKind, setPickerKind] = useState<"audio" | "image" | "video" | "file">("file");
   const mediaChunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const startedAtRef = useRef<number>(0);
+  const filePickerRef = useRef<HTMLInputElement | null>(null);
 
   const deviceId = useMemo(() => {
     const existing = localStorage.getItem("chatsoft.deviceId");
     if (existing) return existing;
-    const next = crypto.randomUUID();
+    const next = createId();
     localStorage.setItem("chatsoft.deviceId", next);
     return next;
   }, []);
@@ -94,7 +124,7 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
       const blob = new Blob(mediaChunksRef.current, { type: recorder.mimeType || "audio/webm" });
       const durationMs = Date.now() - startedAtRef.current;
       const uploaded = await client.uploadVoice(blob, durationMs);
-      client.sendVoice(serverBaseUrl.replace(/\/$/, "") + uploaded.mediaUrl, uploaded.durationMs, uploaded.mimeType);
+      await client.sendVoice(serverBaseUrl.replace(/\/$/, "") + uploaded.mediaUrl, uploaded.durationMs, uploaded.mimeType);
       stream.getTracks().forEach((track) => track.stop());
     };
     recorder.start();
@@ -104,6 +134,14 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
   function stopRecording() {
     recorderRef.current?.stop();
     setRecording(false);
+  }
+
+  async function handleAttachmentSelect(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const uploaded = await client.uploadAttachment(file, pickerKind, file.name);
+    await client.sendAttachment(pickerKind, uploaded);
+    event.target.value = "";
   }
 
   return (
@@ -128,21 +166,32 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
                 <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
                 <span>{message.status}</span>
               </div>
-              {message.kind === "text" ? (
-                <p>{message.text}</p>
-              ) : (
-                <audio controls preload="none" src={message.mediaUrl}></audio>
-              )}
+              {renderMessageBody(message)}
             </article>
           ))}
         </section>
         <section className="composer">
           <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="输入文本消息" />
           <div className="composer-actions">
+            <input
+              ref={filePickerRef}
+              type="file"
+              className="hidden-picker"
+              accept={
+                pickerKind === "audio"
+                  ? "audio/*"
+                  : pickerKind === "image"
+                    ? "image/*"
+                    : pickerKind === "video"
+                      ? "video/*"
+                      : "*/*"
+              }
+              onChange={handleAttachmentSelect}
+            />
             <button
               onClick={() => {
                 if (!text.trim()) return;
-                client.sendText(text.trim());
+                void client.sendText(text.trim());
                 setText("");
               }}
             >
@@ -150,6 +199,38 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
             </button>
             <button onMouseDown={startRecording} onMouseUp={stopRecording} onMouseLeave={() => recording && stopRecording()}>
               {recording ? "松开发送语音" : "按住录音"}
+            </button>
+            <button
+              onClick={() => {
+                setPickerKind("image");
+                filePickerRef.current?.click();
+              }}
+            >
+              图片
+            </button>
+            <button
+              onClick={() => {
+                setPickerKind("video");
+                filePickerRef.current?.click();
+              }}
+            >
+              视频
+            </button>
+            <button
+              onClick={() => {
+                setPickerKind("audio");
+                filePickerRef.current?.click();
+              }}
+            >
+              音频
+            </button>
+            <button
+              onClick={() => {
+                setPickerKind("file");
+                filePickerRef.current?.click();
+              }}
+            >
+              文件
             </button>
           </div>
         </section>

@@ -1,9 +1,11 @@
 import type {
   AgentInfo,
+  AttachmentPayload,
   ChatMessage,
   ClientToServerEvent,
   ConversationSummary,
   DeviceInfo,
+  SendAttachmentEvent,
   SendTextEvent,
   SendVoiceEvent,
   ServerToClientEvent
@@ -21,6 +23,8 @@ export interface ChatClientOptions {
   wsUrl: string;
   device: DeviceInfo;
 }
+
+export interface UploadedAttachment extends AttachmentPayload {}
 
 export class ChatClient {
   private socket: WebSocket | null = null;
@@ -105,6 +109,21 @@ export class ChatClient {
     return payload;
   }
 
+  async uploadAttachment(file: File | Blob, kind: "audio" | "image" | "video" | "file", fileName?: string) {
+    const form = new FormData();
+    const inferredName = fileName ?? ("name" in file && typeof file.name === "string" ? file.name : `${kind}-${createId()}`);
+    form.append("file", file, inferredName);
+    form.append("kind", kind);
+    const response = await fetch(`${this.options.serverBaseUrl}/api/upload/attachment`, {
+      method: "POST",
+      body: form
+    });
+    if (!response.ok) {
+      throw new Error("上传附件失败");
+    }
+    return (await response.json()) as UploadedAttachment;
+  }
+
   async listAgents() {
     const response = await fetch(`${this.options.serverBaseUrl}/api/agents`);
     if (!response.ok) {
@@ -179,6 +198,37 @@ export class ChatClient {
         mediaUrl,
         durationMs,
         mimeType
+      })
+    });
+    await this.fetchRecent(conversationId);
+  }
+
+  async sendAttachment(
+    kind: "audio" | "image" | "video" | "file",
+    attachment: UploadedAttachment,
+    conversationId = DEFAULT_CONVERSATION_ID
+  ) {
+    const event: SendAttachmentEvent = {
+      type: "message.send_attachment",
+      conversationId,
+      tempId: createId(),
+      kind,
+      ...attachment
+    };
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.send(event);
+      return;
+    }
+    await fetch(`${this.options.serverBaseUrl}/api/messages/attachment`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        deviceId: this.options.device.deviceId,
+        conversationId,
+        kind,
+        ...attachment
       })
     });
     await this.fetchRecent(conversationId);

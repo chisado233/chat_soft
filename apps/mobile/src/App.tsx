@@ -1,6 +1,47 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ChatClient, createId } from "@chat-soft/core";
 import type { AgentInfo, ChatMessage, ConversationSummary, DeviceInfo } from "@chat-soft/protocol";
+
+const attachmentPickerMap = {
+  audio: "audio/*",
+  image: "image/*",
+  video: "video/*",
+  file: "*/*"
+} as const;
+
+function messagePreview(message?: ChatMessage) {
+  if (!message) return "暂无消息";
+  if (message.kind === "text") return message.text;
+  if (message.kind === "voice") return "[语音]";
+  if (message.kind === "audio") return `[音频] ${message.fileName}`;
+  if (message.kind === "image") return `[图片] ${message.fileName}`;
+  if (message.kind === "video") return `[视频] ${message.fileName}`;
+  return `[文件] ${message.fileName}`;
+}
+
+function renderMessageBody(message: ChatMessage) {
+  if (message.kind === "text") {
+    return <p>{message.text}</p>;
+  }
+  if (message.kind === "voice" || message.kind === "audio") {
+    return <audio controls preload="metadata" src={message.mediaUrl}></audio>;
+  }
+  if (message.kind === "image") {
+    return (
+      <a href={message.mediaUrl} target="_blank" rel="noreferrer">
+        <img className="message-image" src={message.mediaUrl} alt={message.fileName} />
+      </a>
+    );
+  }
+  if (message.kind === "video") {
+    return <video className="message-video" controls preload="metadata" src={message.mediaUrl}></video>;
+  }
+  return (
+    <a href={message.mediaUrl} target="_blank" rel="noreferrer" className="file-link">
+      {message.fileName}
+    </a>
+  );
+}
 
 export function App({ platform }: { platform: DeviceInfo["platform"] }) {
   const [serverBaseUrl, setServerBaseUrl] = useState(
@@ -14,9 +55,11 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [pickerKind, setPickerKind] = useState<keyof typeof attachmentPickerMap>("file");
   const mediaChunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const startedAtRef = useRef<number>(0);
+  const filePickerRef = useRef<HTMLInputElement | null>(null);
 
   const deviceId = useMemo(() => {
     const existing = localStorage.getItem("chatsoft.mobile.deviceId");
@@ -126,6 +169,14 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
     setRecording(false);
   }
 
+  async function handleAttachmentSelect(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file || !activeConversationId) return;
+    const uploaded = await client.uploadAttachment(file, pickerKind, file.name);
+    await client.sendAttachment(pickerKind, uploaded, activeConversationId);
+    event.target.value = "";
+  }
+
   return (
     <div className="mobile-shell">
       <header className="mobile-header">
@@ -166,7 +217,7 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
               >
                 <strong>{conversation.title}</strong>
                 <span>{conversation.type === "agent" ? "Agent" : "设备"}</span>
-                <small>{conversation.lastMessage?.kind === "text" ? conversation.lastMessage.text : "暂无消息"}</small>
+                <small>{messagePreview(conversation.lastMessage)}</small>
               </button>
             ))}
         </section>
@@ -176,7 +227,7 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
           <div className="mobile-messages">
             {visibleMessages.map((message) => (
               <div key={message.id} className={`bubble ${message.senderDeviceId === deviceId ? "self" : "peer"}`}>
-                {message.kind === "text" ? <p>{message.text}</p> : <audio controls preload="none" src={message.mediaUrl}></audio>}
+                {renderMessageBody(message)}
                 <small>{message.status}</small>
               </div>
             ))}
@@ -193,6 +244,13 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
           disabled={!activeConversationId}
         />
         <div className="mobile-actions">
+          <input
+            ref={filePickerRef}
+            type="file"
+            accept={attachmentPickerMap[pickerKind]}
+            className="hidden-picker"
+            onChange={handleAttachmentSelect}
+          />
           <button
             disabled={!activeConversationId}
             onClick={() => {
@@ -205,6 +263,42 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
           </button>
           <button disabled={!activeConversationId} onTouchStart={startRecording} onTouchEnd={stopRecording}>
             {recording ? "松开发送" : "按住录音"}
+          </button>
+          <button
+            disabled={!activeConversationId}
+            onClick={() => {
+              setPickerKind("image");
+              filePickerRef.current?.click();
+            }}
+          >
+            图片
+          </button>
+          <button
+            disabled={!activeConversationId}
+            onClick={() => {
+              setPickerKind("video");
+              filePickerRef.current?.click();
+            }}
+          >
+            视频
+          </button>
+          <button
+            disabled={!activeConversationId}
+            onClick={() => {
+              setPickerKind("audio");
+              filePickerRef.current?.click();
+            }}
+          >
+            音频
+          </button>
+          <button
+            disabled={!activeConversationId}
+            onClick={() => {
+              setPickerKind("file");
+              filePickerRef.current?.click();
+            }}
+          >
+            文件
           </button>
         </div>
       </footer>

@@ -148,12 +148,13 @@ body {
 
 .mobile-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
 }
 
 .mobile-actions button {
-  flex: 1;
+  flex: 1 1 calc(33.333% - 8px);
   padding: 12px;
   border: none;
   border-radius: 12px;
@@ -169,6 +170,25 @@ body {
   color: #6a7888;
   font-size: 14px;
   padding: 8px 0;
+}
+
+.hidden-picker {
+  display: none;
+}
+
+.message-image,
+.message-video {
+  width: 100%;
+  max-height: 260px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: #dfe7ef;
+}
+
+.file-link {
+  color: #0f6b94;
+  font-weight: 600;
+  text-decoration: none;
 }
 
 .fatal-screen {

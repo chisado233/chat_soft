@@ -83,6 +83,7 @@ body {
 
 .composer-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 12px;
 }
@@ -94,4 +95,24 @@ body {
   background: #0f6b94;
   color: white;
   cursor: pointer;
+}
+
+.hidden-picker {
+  display: none;
+}
+
+.message-image,
+.message-video {
+  width: 100%;
+  max-width: 420px;
+  max-height: 320px;
+  border-radius: 12px;
+  object-fit: cover;
+  background: #dfe7ef;
+}
+
+.file-link {
+  color: #0f6b94;
+  font-weight: 600;
+  text-decoration: none;
 }
