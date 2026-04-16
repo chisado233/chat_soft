@@ -1,0 +1,18 @@
+{
+  "name": "chat-soft",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.18.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev:server": "pnpm --filter @chat-soft/server dev",
+    "dev:desktop": "pnpm --filter @chat-soft/desktop dev",
+    "dev:mobile": "pnpm --filter @chat-soft/mobile dev",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,77 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #f5f7fb;
+}
+
+.mobile-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  padding: 16px;
+  background: #0f6b94;
+  color: white;
+}
+
+.inline-settings {
+  display: grid;
+  gap: 8px;
+}
+
+.inline-settings input {
+  padding: 10px;
+  border: none;
+  border-radius: 12px;
+}
+
+.mobile-messages {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bubble {
+  padding: 12px;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 4px 14px rgba(16, 32, 51, 0.08);
+}
+
+.bubble.self {
+  background: #d6f5e8;
+}
+
+.mobile-composer {
+  padding: 12px;
+  background: white;
+  border-top: 1px solid #dde5ee;
+}
+
+.mobile-composer textarea {
+  width: 100%;
+  min-height: 80px;
+  border-radius: 12px;
+  border: 1px solid #ccd7e1;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.mobile-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.mobile-actions button {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: #0f6b94;
+  color: white;
+}

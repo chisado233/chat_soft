@@ -1,0 +1,97 @@
+body {
+  margin: 0;
+  font-family: "Segoe UI", sans-serif;
+  background: #eef3f7;
+  color: #102033;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+
+.config-panel {
+  background: linear-gradient(180deg, #0f4c81, #0f6b94);
+  color: white;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.config-panel input {
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  border: none;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  gap: 16px;
+}
+
+.messages {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message-card {
+  max-width: 70%;
+  padding: 12px;
+  border-radius: 16px;
+  background: white;
+  box-shadow: 0 8px 24px rgba(16, 32, 51, 0.08);
+}
+
+.message-card.self {
+  align-self: flex-end;
+  background: #d6f5e8;
+}
+
+.message-meta {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: #567;
+  margin-bottom: 8px;
+}
+
+.composer {
+  background: white;
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 8px 24px rgba(16, 32, 51, 0.08);
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 90px;
+  resize: vertical;
+  border: 1px solid #ccd7e1;
+  border-radius: 14px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.composer-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.composer-actions button {
+  padding: 10px 14px;
+  border: none;
+  border-radius: 12px;
+  background: #0f6b94;
+  color: white;
+  cursor: pointer;
+}

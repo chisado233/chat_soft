@@ -1,0 +1,15 @@
+{
+  "name": "@chat-soft/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@chat-soft/protocol": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "test": "vitest run --passWithNoTests"
+  }
+}

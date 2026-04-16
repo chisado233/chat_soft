@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-electron/
+.pnpm-store/
+.gradle/
+server/api/data/
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+apps/mobile/android/build/
+*.log
+image/

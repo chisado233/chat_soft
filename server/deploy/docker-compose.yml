@@ -1,0 +1,17 @@
+services:
+  chat-soft-server:
+    image: node:24-bookworm-slim
+    container_name: chat-soft-server
+    working_dir: /app
+    command: sh -c "corepack enable && corepack prepare pnpm@10.18.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @chat-soft/server build && pnpm --filter @chat-soft/server start"
+    ports:
+      - "3000:3000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+    volumes:
+      - ../../:/app
+      - chat_soft_data:/app/server/api/data
+
+volumes:
+  chat_soft_data:

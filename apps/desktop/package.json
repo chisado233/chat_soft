@@ -1,0 +1,27 @@
+{
+  "name": "@chat-soft/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist-electron/main.js",
+  "type": "module",
+  "scripts": {
+    "build": "vite build && tsc -p tsconfig.electron.json",
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && set VITE_DEV_SERVER_URL=http://127.0.0.1:5173 && tsc -p tsconfig.electron.json && electron dist-electron/main.js\"",
+    "agent:start": "node dist-electron/agent.js",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@chat-soft/core": "workspace:*",
+    "@chat-soft/protocol": "workspace:*",
+    "fastify": "^5.6.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "concurrently": "^9.2.1",
+    "electron": "^37.3.1",
+    "vite": "^7.1.7",
+    "wait-on": "^8.0.5"
+  }
+}
