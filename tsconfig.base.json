@@ -7,14 +7,6 @@
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
-    "paths": {
-      "@chat-soft/protocol": [
-        "shared/protocol/src"
-      ],
-      "@chat-soft/core": [
-        "shared/core/src"
-      ]
-    }
+    "baseUrl": "."
   }
 }
