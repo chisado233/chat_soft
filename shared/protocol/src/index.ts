@@ -1,5 +1,7 @@
 export type MessageKind = "text" | "voice";
 export type MessageStatus = "sending" | "sent" | "delivered" | "read" | "failed";
+export type ConversationType = "direct" | "agent";
+export type AgentStatus = "online" | "offline";
 
 export interface BaseMessage {
   id: string;
@@ -30,9 +32,24 @@ export interface DeviceInfo {
   platform: "android" | "windows" | "unknown";
 }
 
-export interface ConversationState {
+export interface AgentInfo {
+  agentId: string;
+  name: string;
+  description: string;
   conversationId: string;
-  messages: ChatMessage[];
+  registeredAt: string;
+  status: AgentStatus;
+  transport: "desktop-local" | "server";
+  agentDeviceId: string;
+}
+
+export interface ConversationSummary {
+  conversationId: string;
+  title: string;
+  type: ConversationType;
+  updatedAt: string;
+  agentId?: string;
+  lastMessage?: ChatMessage;
 }
 
 export interface HelloEvent {
@@ -79,7 +96,6 @@ export interface SyncPullEvent {
 
 export interface SyncBatchEvent {
   type: "sync.batch";
-  conversationId: string;
   messages: ChatMessage[];
 }
 
@@ -108,5 +124,6 @@ export type ServerToClientEvent =
   | ErrorEvent;
 
 export const DEFAULT_CONVERSATION_ID = "primary";
+export const DEFAULT_CONVERSATION_TITLE = "我的设备";
 
 export const LOCAL_AGENT_PORT = 45888;

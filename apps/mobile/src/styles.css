@@ -1,7 +1,12 @@
 body {
   margin: 0;
   font-family: system-ui, sans-serif;
-  background: #f5f7fb;
+  background: #f4f6fb;
+  color: #1e293b;
+}
+
+#root {
+  min-height: 100vh;
 }
 
 .mobile-shell {
@@ -10,7 +15,7 @@ body {
   flex-direction: column;
 }
 
-header {
+.mobile-header {
   padding: 16px;
   background: #0f6b94;
   color: white;
@@ -27,9 +32,88 @@ header {
   border-radius: 12px;
 }
 
+.agent-strip {
+  padding: 12px;
+  background: #eff4f8;
+  border-bottom: 1px solid #d9e3ee;
+}
+
+.section-title {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #51606f;
+}
+
+.agent-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.agent-chip,
+.conversation-card {
+  border: none;
+  border-radius: 14px;
+  background: white;
+  box-shadow: 0 6px 20px rgba(15, 35, 54, 0.08);
+}
+
+.agent-chip {
+  min-width: 120px;
+  padding: 10px 12px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+}
+
+.agent-chip.active,
+.conversation-card.active {
+  outline: 2px solid #0f6b94;
+}
+
+.agent-chip span,
+.conversation-card span,
+.conversation-card small {
+  color: #5b6b7b;
+}
+
+.mobile-content {
+  flex: 1;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+}
+
+.conversation-list {
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.conversation-card {
+  padding: 12px;
+  text-align: left;
+  display: grid;
+  gap: 4px;
+}
+
+.conversation-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.conversation-title {
+  padding: 0 12px 8px;
+  font-weight: 700;
+}
+
 .mobile-messages {
   flex: 1;
-  padding: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 12px 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -59,6 +143,7 @@ header {
   border: 1px solid #ccd7e1;
   padding: 10px;
   box-sizing: border-box;
+  resize: vertical;
 }
 
 .mobile-actions {
@@ -74,4 +159,30 @@ header {
   border-radius: 12px;
   background: #0f6b94;
   color: white;
+}
+
+.mobile-actions button:disabled {
+  background: #a8bbc6;
+}
+
+.empty-hint {
+  color: #6a7888;
+  font-size: 14px;
+  padding: 8px 0;
+}
+
+.fatal-screen {
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 24px;
+  background: #fff4f4;
+  color: #5f1720;
+}
+
+.fatal-screen pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px;
+  border-radius: 12px;
+  background: white;
 }

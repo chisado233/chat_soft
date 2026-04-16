@@ -1,17 +1,9 @@
-import Fastify from "fastify";
-import { LOCAL_AGENT_PORT } from "@chat-soft/protocol";
+const Fastify = require("fastify");
 
-interface LocalAgentConfig {
-  serverBaseUrl: string;
-  deviceId: string;
-  deviceName: string;
-  agentId: string;
-  agentName: string;
-  agentDescription: string;
-}
+const LOCAL_AGENT_PORT = 45888;
 
-export async function startLocalAgent(initial?: Partial<LocalAgentConfig>) {
-  let config: LocalAgentConfig = {
+async function startLocalAgent(initial = {}) {
+  let config = {
     serverBaseUrl: "http://127.0.0.1:3000",
     deviceId: "desktop-local-agent",
     deviceName: "Windows-PC",
@@ -24,7 +16,7 @@ export async function startLocalAgent(initial?: Partial<LocalAgentConfig>) {
   const localAgent = Fastify({ logger: false });
   localAgent.get("/health", async () => ({ ok: true }));
   localAgent.get("/api/v1/config", async () => config);
-  localAgent.post<{ Body: Partial<LocalAgentConfig> }>("/api/v1/config", async (request) => {
+  localAgent.post("/api/v1/config", async (request) => {
     config = { ...config, ...request.body };
     return { ok: true, config };
   });
@@ -32,13 +24,7 @@ export async function startLocalAgent(initial?: Partial<LocalAgentConfig>) {
     const response = await fetch(`${config.serverBaseUrl.replace(/\/$/, "")}/api/agents`);
     return response.json();
   });
-  localAgent.post<{
-    Body: {
-      agentId?: string;
-      name?: string;
-      description?: string;
-    };
-  }>("/api/v1/agents/register", async (request) => {
+  localAgent.post("/api/v1/agents/register", async (request) => {
     const response = await fetch(`${config.serverBaseUrl.replace(/\/$/, "")}/api/agents/register`, {
       method: "POST",
       headers: {
@@ -58,7 +44,7 @@ export async function startLocalAgent(initial?: Partial<LocalAgentConfig>) {
     const response = await fetch(`${config.serverBaseUrl.replace(/\/$/, "")}/api/conversations`);
     return response.json();
   });
-  localAgent.get<{ Params: { conversationId: string } }>("/api/v1/conversations/:conversationId/messages", async (request) => {
+  localAgent.get("/api/v1/conversations/:conversationId/messages", async (request) => {
     const response = await fetch(
       `${config.serverBaseUrl.replace(/\/$/, "")}/api/conversations/${encodeURIComponent(request.params.conversationId)}/messages`
     );
@@ -68,7 +54,7 @@ export async function startLocalAgent(initial?: Partial<LocalAgentConfig>) {
     const response = await fetch(`${config.serverBaseUrl.replace(/\/$/, "")}/api/messages/recent`);
     return response.json();
   });
-  localAgent.post<{ Body: { conversationId?: string; text: string } }>("/api/v1/messages/text", async (request) => {
+  localAgent.post("/api/v1/messages/text", async (request) => {
     const response = await fetch(`${config.serverBaseUrl.replace(/\/$/, "")}/api/messages/text`, {
       method: "POST",
       headers: {
@@ -76,8 +62,8 @@ export async function startLocalAgent(initial?: Partial<LocalAgentConfig>) {
       },
       body: JSON.stringify({
         deviceId: config.deviceId,
-        conversationId: request.body.conversationId,
-        text: request.body.text
+        conversationId: request.body?.conversationId,
+        text: request.body?.text
       })
     });
     return response.json();
@@ -86,3 +72,8 @@ export async function startLocalAgent(initial?: Partial<LocalAgentConfig>) {
   await localAgent.listen({ host: "127.0.0.1", port: LOCAL_AGENT_PORT });
   return localAgent;
 }
+
+module.exports = {
+  LOCAL_AGENT_PORT,
+  startLocalAgent
+};

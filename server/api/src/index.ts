@@ -8,17 +8,35 @@ import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { nanoid } from "nanoid";
 import type {
+  AgentInfo,
   ChatMessage,
   ClientToServerEvent,
+  ConversationSummary,
   DeviceInfo,
   ServerToClientEvent
 } from "@chat-soft/protocol";
-import { DEFAULT_CONVERSATION_ID } from "@chat-soft/protocol";
+import { DEFAULT_CONVERSATION_ID, DEFAULT_CONVERSATION_TITLE } from "@chat-soft/protocol";
 
 interface PersistedDb {
   devices: DeviceInfo[];
   messages: ChatMessage[];
+  agents: AgentInfo[];
+  conversations: ConversationSummary[];
 }
+
+type TextMessageBody = {
+  deviceId: string;
+  text: string;
+  conversationId?: string;
+};
+
+type VoiceMessageBody = {
+  deviceId: string;
+  mediaUrl: string;
+  durationMs: number;
+  mimeType: string;
+  conversationId?: string;
+};
 
 const app = Fastify({ logger: true });
 const dataDir = join(process.cwd(), "data");
@@ -26,17 +44,49 @@ const mediaDir = join(dataDir, "media");
 const dbPath = join(dataDir, "db.json");
 const sockets = new Map<string, Set<WebSocket>>();
 
+function defaultConversation(): ConversationSummary {
+  return {
+    conversationId: DEFAULT_CONVERSATION_ID,
+    title: DEFAULT_CONVERSATION_TITLE,
+    type: "direct",
+    updatedAt: new Date(0).toISOString()
+  };
+}
+
 function ensureData() {
   if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
   if (!existsSync(mediaDir)) mkdirSync(mediaDir, { recursive: true });
   if (!existsSync(dbPath)) {
-    writeFileSync(dbPath, JSON.stringify({ devices: [], messages: [] }, null, 2));
+    writeFileSync(
+      dbPath,
+      JSON.stringify({ devices: [], messages: [], agents: [], conversations: [defaultConversation()] }, null, 2)
+    );
   }
+}
+
+function normalizeDb(payload: unknown): PersistedDb {
+  const value = payload && typeof payload === "object" ? (payload as Partial<PersistedDb>) : {};
+  const messages = Array.isArray(value.messages) ? value.messages : [];
+  const agents = Array.isArray(value.agents) ? value.agents : [];
+  const devices = Array.isArray(value.devices) ? value.devices : [];
+  const conversations = Array.isArray(value.conversations) ? value.conversations : [];
+
+  const nextConversations = conversations.length > 0 ? conversations : [defaultConversation()];
+  if (!nextConversations.some((conversation) => conversation.conversationId === DEFAULT_CONVERSATION_ID)) {
+    nextConversations.unshift(defaultConversation());
+  }
+
+  return {
+    devices,
+    messages,
+    agents,
+    conversations: nextConversations
+  };
 }
 
 function loadDb(): PersistedDb {
   ensureData();
-  return JSON.parse(readFileSync(dbPath, "utf8")) as PersistedDb;
+  return normalizeDb(JSON.parse(readFileSync(dbPath, "utf8")));
 }
 
 function saveDb(db: PersistedDb) {
@@ -52,6 +102,72 @@ function pushToAll(event: ServerToClientEvent) {
   }
 }
 
+function upsertConversation(db: PersistedDb, conversation: ConversationSummary) {
+  const index = db.conversations.findIndex((item) => item.conversationId === conversation.conversationId);
+  if (index >= 0) {
+    db.conversations[index] = { ...db.conversations[index], ...conversation };
+    return db.conversations[index];
+  }
+  db.conversations.push(conversation);
+  return conversation;
+}
+
+function touchConversation(db: PersistedDb, conversationId: string, lastMessage?: ChatMessage) {
+  const existing = db.conversations.find((item) => item.conversationId === conversationId);
+  const updatedAt = lastMessage?.createdAt ?? new Date().toISOString();
+  if (existing) {
+    existing.updatedAt = updatedAt;
+    if (lastMessage) existing.lastMessage = lastMessage;
+    return existing;
+  }
+  return upsertConversation(db, {
+    conversationId,
+    title: conversationId === DEFAULT_CONVERSATION_ID ? DEFAULT_CONVERSATION_TITLE : conversationId,
+    type: conversationId === DEFAULT_CONVERSATION_ID ? "direct" : "agent",
+    updatedAt,
+    lastMessage
+  });
+}
+
+function sortMessages(messages: ChatMessage[]) {
+  return [...messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+function listConversations(db: PersistedDb) {
+  return [...db.conversations].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+function createTextMessage(body: TextMessageBody, messageId?: string): ChatMessage {
+  return {
+    id: messageId ?? nanoid(),
+    kind: "text",
+    conversationId: body.conversationId ?? DEFAULT_CONVERSATION_ID,
+    senderDeviceId: body.deviceId,
+    createdAt: new Date().toISOString(),
+    status: "delivered",
+    text: body.text
+  };
+}
+
+function createVoiceMessage(body: VoiceMessageBody, messageId?: string): ChatMessage {
+  return {
+    id: messageId ?? nanoid(),
+    kind: "voice",
+    conversationId: body.conversationId ?? DEFAULT_CONVERSATION_ID,
+    senderDeviceId: body.deviceId,
+    createdAt: new Date().toISOString(),
+    status: "delivered",
+    mediaUrl: body.mediaUrl,
+    durationMs: body.durationMs,
+    mimeType: body.mimeType
+  };
+}
+
+function appendMessage(db: PersistedDb, message: ChatMessage) {
+  db.messages.push(message);
+  touchConversation(db, message.conversationId, message);
+}
+
 app.register(cors, { origin: true });
 app.register(multipart);
 app.register(websocket);
@@ -62,25 +178,110 @@ app.register(fastifyStatic, {
 
 app.get("/health", async () => ({ ok: true }));
 
-app.get("/api/messages/recent", async () => {
+app.get("/api/agents", async () => {
   const db = loadDb();
   return {
-    messages: db.messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt)).slice(-100)
+    agents: db.agents.sort((a, b) => b.registeredAt.localeCompare(a.registeredAt))
   };
 });
 
-app.post<{ Body: { deviceId: string; text: string; conversationId?: string } }>("/api/messages/text", async (request) => {
-  const db = loadDb();
-  const message: ChatMessage = {
-    id: nanoid(),
-    kind: "text",
-    conversationId: request.body.conversationId ?? DEFAULT_CONVERSATION_ID,
-    senderDeviceId: request.body.deviceId,
-    createdAt: new Date().toISOString(),
-    status: "delivered",
-    text: request.body.text
+app.post<{
+  Body: {
+    agentId?: string;
+    name: string;
+    description?: string;
+    transport?: "desktop-local" | "server";
+    agentDeviceId?: string;
   };
-  db.messages.push(message);
+}>("/api/agents/register", async (request) => {
+  const db = loadDb();
+  const agentId = request.body.agentId?.trim() || `agent_${nanoid(8)}`;
+  const conversationId = `agent:${agentId}`;
+  const agentDeviceId = request.body.agentDeviceId?.trim() || `agent-device:${agentId}`;
+  const agent: AgentInfo = {
+    agentId,
+    name: request.body.name.trim(),
+    description: request.body.description?.trim() || "Desktop agent",
+    conversationId,
+    registeredAt: new Date().toISOString(),
+    status: "online",
+    transport: request.body.transport ?? "desktop-local",
+    agentDeviceId
+  };
+
+  db.agents = db.agents.filter((item) => item.agentId !== agentId);
+  db.agents.push(agent);
+  upsertConversation(db, {
+    conversationId,
+    title: agent.name,
+    type: "agent",
+    updatedAt: agent.registeredAt,
+    agentId
+  });
+
+  if (!db.devices.some((device) => device.deviceId === agentDeviceId)) {
+    db.devices.push({
+      deviceId: agentDeviceId,
+      deviceName: agent.name,
+      platform: "windows"
+    });
+  }
+
+  saveDb(db);
+  return { ok: true, agent };
+});
+
+app.get("/api/conversations", async () => {
+  const db = loadDb();
+  for (const conversation of db.conversations) {
+    const messages = db.messages.filter((message) => message.conversationId === conversation.conversationId);
+    const lastMessage = sortMessages(messages).at(-1);
+    if (lastMessage) {
+      conversation.lastMessage = lastMessage;
+      conversation.updatedAt = lastMessage.createdAt;
+    }
+  }
+  saveDb(db);
+  return {
+    conversations: listConversations(db)
+  };
+});
+
+app.get<{
+  Params: { conversationId: string };
+}>("/api/conversations/:conversationId/messages", async (request) => {
+  const db = loadDb();
+  return {
+    messages: sortMessages(db.messages.filter((message) => message.conversationId === request.params.conversationId))
+  };
+});
+
+app.get<{
+  Querystring: { conversationId?: string };
+}>("/api/messages/recent", async (request) => {
+  const db = loadDb();
+  const messages = request.query.conversationId
+    ? db.messages.filter((message) => message.conversationId === request.query.conversationId)
+    : db.messages;
+  return {
+    messages: sortMessages(messages).slice(-100)
+  };
+});
+
+app.post<{ Body: TextMessageBody }>("/api/messages/text", async (request) => {
+  const db = loadDb();
+  const message = createTextMessage(request.body);
+  appendMessage(db, message);
+  saveDb(db);
+  pushToAll({ type: "message.created", message });
+  pushToAll({ type: "message.status", messageId: message.id, status: "delivered" });
+  return { ok: true, message };
+});
+
+app.post<{ Body: VoiceMessageBody }>("/api/messages/voice", async (request) => {
+  const db = loadDb();
+  const message = createVoiceMessage(request.body);
+  appendMessage(db, message);
   saveDb(db);
   pushToAll({ type: "message.created", message });
   pushToAll({ type: "message.status", messageId: message.id, status: "delivered" });
@@ -110,14 +311,16 @@ app.register(async (wsApp) => {
     socket.on("message", (raw: unknown) => {
       const db = loadDb();
       const event = JSON.parse(String(raw)) as ClientToServerEvent;
+
       if (event.type === "auth.hello") {
         currentDeviceId = event.device.deviceId;
         if (!sockets.has(currentDeviceId)) sockets.set(currentDeviceId, new Set());
         sockets.get(currentDeviceId)?.add(socket as unknown as WebSocket);
         if (!db.devices.some((device) => device.deviceId === event.device.deviceId)) {
           db.devices.push(event.device);
-          saveDb(db);
         }
+        touchConversation(db, DEFAULT_CONVERSATION_ID);
+        saveDb(db);
         const ready: ServerToClientEvent = {
           type: "auth.ready",
           deviceId: event.device.deviceId,
@@ -126,49 +329,50 @@ app.register(async (wsApp) => {
         socket.send(JSON.stringify(ready));
         return;
       }
+
       if (event.type === "sync.pull") {
         const sync: ServerToClientEvent = {
           type: "sync.batch",
-          conversationId: DEFAULT_CONVERSATION_ID,
-          messages: db.messages
+          messages: sortMessages(db.messages)
         };
         socket.send(JSON.stringify(sync));
         return;
       }
+
       if (event.type === "message.send_text") {
-        const message: ChatMessage = {
-          id: event.tempId,
-          kind: "text",
-          conversationId: event.conversationId,
-          senderDeviceId: currentDeviceId,
-          createdAt: new Date().toISOString(),
-          status: "delivered",
-          text: event.text
-        };
-        db.messages.push(message);
+        const message = createTextMessage(
+          {
+            deviceId: currentDeviceId,
+            conversationId: event.conversationId,
+            text: event.text
+          },
+          event.tempId
+        );
+        appendMessage(db, message);
         saveDb(db);
         pushToAll({ type: "message.created", message });
         pushToAll({ type: "message.status", messageId: message.id, status: "delivered" });
         return;
       }
+
       if (event.type === "message.send_voice") {
-        const message: ChatMessage = {
-          id: event.tempId,
-          kind: "voice",
-          conversationId: event.conversationId,
-          senderDeviceId: currentDeviceId,
-          createdAt: new Date().toISOString(),
-          status: "delivered",
-          mediaUrl: event.mediaUrl,
-          durationMs: event.durationMs,
-          mimeType: event.mimeType
-        };
-        db.messages.push(message);
+        const message = createVoiceMessage(
+          {
+            deviceId: currentDeviceId,
+            conversationId: event.conversationId,
+            mediaUrl: event.mediaUrl,
+            durationMs: event.durationMs,
+            mimeType: event.mimeType
+          },
+          event.tempId
+        );
+        appendMessage(db, message);
         saveDb(db);
         pushToAll({ type: "message.created", message });
         pushToAll({ type: "message.status", messageId: message.id, status: "delivered" });
         return;
       }
+
       if (event.type === "message.read") {
         const message = db.messages.find((item) => item.id === event.messageId);
         if (message) {
@@ -178,6 +382,7 @@ app.register(async (wsApp) => {
         }
       }
     });
+
     socket.on("close", () => {
       if (currentDeviceId) {
         sockets.get(currentDeviceId)?.delete(socket as unknown as WebSocket);
