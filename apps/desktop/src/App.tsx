@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ChatClient, createId } from "@chat-soft/core";
-import type { ChatMessage, DeviceInfo } from "@chat-soft/protocol";
+import type { AgentInfo, ChatMessage, DeviceInfo } from "@chat-soft/protocol";
 
 function formatMessage(message: ChatMessage) {
   if (message.kind === "text") return message.text;
@@ -35,9 +35,24 @@ function renderMessageBody(message: ChatMessage) {
   );
 }
 
+function avatarText(title: string) {
+  const cleaned = title.trim();
+  if (!cleaned) return "?";
+  return cleaned.slice(0, 1).toUpperCase();
+}
+
+function Avatar({ title, avatarUrl }: { title: string; avatarUrl?: string }) {
+  return (
+    <div className="message-avatar" aria-label={title}>
+      {avatarUrl ? <img className="avatar-image" src={avatarUrl} alt={title} /> : avatarText(title)}
+    </div>
+  );
+}
+
 export function App({ platform }: { platform: DeviceInfo["platform"] }) {
   const [serverBaseUrl, setServerBaseUrl] = useState(localStorage.getItem("chatsoft.serverBaseUrl") ?? "http://127.0.0.1:3000");
   const [deviceName, setDeviceName] = useState(localStorage.getItem("chatsoft.deviceName") ?? "Windows-PC");
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
@@ -89,7 +104,17 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
   }, [deviceId, deviceName, serverBaseUrl]);
 
   useEffect(() => {
+    async function refreshAgents() {
+      try {
+        const payload = await client.listAgents();
+        setAgents(payload.agents);
+      } catch {
+        setAgents([]);
+      }
+    }
+
     client.connect();
+    void refreshAgents();
     const offMessages = client.onMessages((incoming) => {
       setMessages(incoming);
     });
@@ -102,6 +127,7 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
             Notification.requestPermission();
           }
         }
+        void refreshAgents();
       }
     });
     return () => {
@@ -110,6 +136,11 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
       client.disconnect();
     };
   }, [client, deviceId]);
+
+  const agentByDeviceId = useMemo(
+    () => new Map(agents.map((agent) => [agent.agentDeviceId, agent])),
+    [agents]
+  );
 
   async function startRecording() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -159,16 +190,25 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
       </aside>
       <main className="chat-panel">
         <section className="messages">
-          {messages.map((message) => (
-            <article key={message.id} className={`message-card ${message.senderDeviceId === deviceId ? "self" : "peer"}`}>
-              <div className="message-meta">
-                <span>{message.senderDeviceId === deviceId ? "我" : message.senderDeviceId}</span>
-                <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
-                <span>{message.status}</span>
-              </div>
-              {renderMessageBody(message)}
-            </article>
-          ))}
+          {messages.map((message) => {
+            const isSelf = message.senderDeviceId === deviceId;
+            const boundAgent = agentByDeviceId.get(message.senderDeviceId);
+            const senderTitle = isSelf ? "我" : boundAgent?.name ?? message.senderDeviceId;
+            return (
+              <article key={message.id} className={`message-row ${isSelf ? "self" : "peer"}`}>
+                {!isSelf && <Avatar title={senderTitle} avatarUrl={boundAgent?.avatarUrl} />}
+                <div className={`message-card ${isSelf ? "self" : "peer"}`}>
+                  <div className="message-meta">
+                    <span>{senderTitle}</span>
+                    <span>{new Date(message.createdAt).toLocaleTimeString()}</span>
+                    <span>{message.status}</span>
+                  </div>
+                  {renderMessageBody(message)}
+                </div>
+                {isSelf && <Avatar title="我" />}
+              </article>
+            );
+          })}
         </section>
         <section className="composer">
           <textarea value={text} onChange={(event) => setText(event.target.value)} placeholder="输入文本消息" />

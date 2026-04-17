@@ -48,6 +48,16 @@ function normalizeMessage(serverBaseUrl: string, message: ChatMessage): ChatMess
   return message;
 }
 
+function normalizeAgent(serverBaseUrl: string, agent: AgentInfo): AgentInfo {
+  if (!agent.avatarUrl) {
+    return agent;
+  }
+  return {
+    ...agent,
+    avatarUrl: resolveMediaUrl(serverBaseUrl, agent.avatarUrl)
+  };
+}
+
 export class ChatClient {
   private socket: WebSocket | null = null;
   private messages: ChatMessage[] = [];
@@ -161,7 +171,10 @@ export class ChatClient {
     if (!response.ok) {
       throw new Error("获取 agent 列表失败");
     }
-    return (await response.json()) as { agents: AgentInfo[] };
+    const payload = (await response.json()) as { agents: AgentInfo[] };
+    return {
+      agents: payload.agents.map((agent) => normalizeAgent(this.options.serverBaseUrl, agent))
+    };
   }
 
   async listConversations() {

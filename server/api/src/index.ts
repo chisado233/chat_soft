@@ -275,6 +275,7 @@ app.post<{
     agentId?: string;
     name: string;
     description?: string;
+    avatarUrl?: string;
     transport?: "desktop-local" | "server";
     agentDeviceId?: string;
   };
@@ -287,6 +288,7 @@ app.post<{
     agentId,
     name: request.body.name.trim(),
     description: request.body.description?.trim() || "Desktop agent",
+    avatarUrl: request.body.avatarUrl?.trim() || undefined,
     conversationId,
     registeredAt: new Date().toISOString(),
     status: "online",

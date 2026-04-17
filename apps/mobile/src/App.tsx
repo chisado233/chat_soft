@@ -61,6 +61,17 @@ function avatarText(title: string) {
   return cleaned.slice(0, 1).toUpperCase();
 }
 
+function Avatar({ title, avatarUrl, className }: { title: string; avatarUrl?: string; className: string }) {
+  if (avatarUrl) {
+    return (
+      <div className={className}>
+        <img className="avatar-image" src={avatarUrl} alt={title} />
+      </div>
+    );
+  }
+  return <div className={className}>{avatarText(title)}</div>;
+}
+
 function messagePreview(message?: ChatMessage) {
   if (!message) return "暂无消息";
   if (message.kind === "text") return message.text;
@@ -539,7 +550,8 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
     return {
       ...conversation,
       displayTitle: boundAgent?.name ?? conversation.title,
-      displaySubtitle: formatAgentStateSummary(conversation, boundAgent)
+      displaySubtitle: formatAgentStateSummary(conversation, boundAgent),
+      avatarUrl: boundAgent?.avatarUrl
     };
   }).filter((conversation) => {
     const boundAgent = agentMap.get(conversation.conversationId);
@@ -592,7 +604,7 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
                     setChatOpen(true);
                   }}
                 >
-                  <div className="friend-avatar">{avatarText(conversation.displayTitle)}</div>
+                  <Avatar title={conversation.displayTitle} avatarUrl={conversation.avatarUrl} className="friend-avatar" />
                   <div className="friend-main">
                     <div className="friend-line">
                       <strong>{conversation.displayTitle}</strong>
@@ -644,12 +656,12 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
           >
             {visibleMessages.map((message) => {
               const isSelf = message.senderDeviceId === deviceId;
+              const activeAgent = activeConversation ? agentMap.get(activeConversation.conversationId) : undefined;
+              const peerTitle = activeConversation ? activeAgent?.name ?? activeConversation.title : "A";
               return (
                 <div key={message.id} className={`chat-row ${isSelf ? "self" : "peer"}`}>
                   {!isSelf && (
-                    <div className="message-avatar">
-                      {avatarText(activeConversation ? agentMap.get(activeConversation.conversationId)?.name ?? activeConversation.title : "A")}
-                    </div>
+                    <Avatar title={peerTitle} avatarUrl={activeAgent?.avatarUrl} className="message-avatar" />
                   )}
                   {isSelf && <div className="message-side-spacer" aria-hidden="true"></div>}
                   <div className={`message-bubble ${isSelf ? "self" : "peer"}`}>

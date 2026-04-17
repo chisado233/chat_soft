@@ -61,6 +61,7 @@ export interface AgentInfo {
   agentId: string;
   name: string;
   description: string;
+  avatarUrl?: string;
   conversationId: string;
   registeredAt: string;
   status: AgentStatus;
