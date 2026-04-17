@@ -26,12 +26,14 @@ interface PersistedDb {
 }
 
 type TextMessageBody = {
+  clientMessageId?: string;
   deviceId: string;
   text: string;
   conversationId?: string;
 };
 
 type VoiceMessageBody = {
+  clientMessageId?: string;
   deviceId: string;
   mediaUrl: string;
   durationMs: number;
@@ -40,6 +42,7 @@ type VoiceMessageBody = {
 };
 
 type AttachmentMessageBody = {
+  clientMessageId?: string;
   deviceId: string;
   conversationId?: string;
   kind: "audio" | "image" | "video" | "file";
@@ -192,6 +195,13 @@ function appendMessage(db: PersistedDb, message: ChatMessage) {
   touchConversation(db, message.conversationId, message);
 }
 
+function findMessageByClientId(db: PersistedDb, clientMessageId?: string) {
+  if (!clientMessageId) {
+    return null;
+  }
+  return db.messages.find((message) => message.id === clientMessageId) ?? null;
+}
+
 app.register(cors, { origin: true });
 app.register(multipart);
 app.register(websocket);
@@ -333,7 +343,11 @@ app.get<{
 
 app.post<{ Body: TextMessageBody }>("/api/messages/text", async (request) => {
   const db = loadDb();
-  const message = createTextMessage(request.body);
+  const existing = findMessageByClientId(db, request.body.clientMessageId);
+  if (existing) {
+    return { ok: true, message: existing, deduplicated: true };
+  }
+  const message = createTextMessage(request.body, request.body.clientMessageId);
   appendMessage(db, message);
   saveDb(db);
   pushToAll({ type: "message.created", message });
@@ -343,7 +357,11 @@ app.post<{ Body: TextMessageBody }>("/api/messages/text", async (request) => {
 
 app.post<{ Body: VoiceMessageBody }>("/api/messages/voice", async (request) => {
   const db = loadDb();
-  const message = createVoiceMessage(request.body);
+  const existing = findMessageByClientId(db, request.body.clientMessageId);
+  if (existing) {
+    return { ok: true, message: existing, deduplicated: true };
+  }
+  const message = createVoiceMessage(request.body, request.body.clientMessageId);
   appendMessage(db, message);
   saveDb(db);
   pushToAll({ type: "message.created", message });
@@ -353,7 +371,11 @@ app.post<{ Body: VoiceMessageBody }>("/api/messages/voice", async (request) => {
 
 app.post<{ Body: AttachmentMessageBody }>("/api/messages/attachment", async (request) => {
   const db = loadDb();
-  const message = createAttachmentMessage(request.body);
+  const existing = findMessageByClientId(db, request.body.clientMessageId);
+  if (existing) {
+    return { ok: true, message: existing, deduplicated: true };
+  }
+  const message = createAttachmentMessage(request.body, request.body.clientMessageId);
   appendMessage(db, message);
   saveDb(db);
   pushToAll({ type: "message.created", message });

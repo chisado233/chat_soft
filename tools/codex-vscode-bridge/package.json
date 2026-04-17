@@ -2,7 +2,7 @@
   "name": "chat-soft-codex-bridge",
   "displayName": "Chat Soft Codex Bridge",
   "description": "Bridge Chat Soft mobile conversations into VS Code Codex-compatible language models and send replies back.",
-  "version": "0.1.5",
+  "version": "0.1.7",
   "publisher": "local",
   "private": true,
   "engines": {
@@ -36,6 +36,10 @@
       {
         "command": "chatSoftCodexBridge.resetHistory",
         "title": "Chat Soft Codex: Reset Conversation History"
+      },
+      {
+        "command": "chatSoftCodexBridge.bindCurrentThread",
+        "title": "Chat Soft Codex: Bind Current Thread"
       }
     ],
     "configuration": {

@@ -191,10 +191,11 @@ export class ChatClient {
   }
 
   async sendText(text: string, conversationId = DEFAULT_CONVERSATION_ID) {
+    const clientMessageId = createId();
     const event: SendTextEvent = {
       type: "message.send_text",
       conversationId,
-      tempId: createId(),
+      tempId: clientMessageId,
       text
     };
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
@@ -207,6 +208,7 @@ export class ChatClient {
         "content-type": "application/json"
       },
       body: JSON.stringify({
+        clientMessageId,
         deviceId: this.options.device.deviceId,
         conversationId,
         text
@@ -216,10 +218,11 @@ export class ChatClient {
   }
 
   async sendVoice(mediaUrl: string, durationMs: number, mimeType: string, conversationId = DEFAULT_CONVERSATION_ID) {
+    const clientMessageId = createId();
     const event: SendVoiceEvent = {
       type: "message.send_voice",
       conversationId,
-      tempId: createId(),
+      tempId: clientMessageId,
       mediaUrl,
       durationMs,
       mimeType
@@ -234,6 +237,7 @@ export class ChatClient {
         "content-type": "application/json"
       },
       body: JSON.stringify({
+        clientMessageId,
         deviceId: this.options.device.deviceId,
         conversationId,
         mediaUrl,
@@ -249,10 +253,11 @@ export class ChatClient {
     attachment: UploadedAttachment,
     conversationId = DEFAULT_CONVERSATION_ID
   ) {
+    const clientMessageId = createId();
     const event: SendAttachmentEvent = {
       type: "message.send_attachment",
       conversationId,
-      tempId: createId(),
+      tempId: clientMessageId,
       kind,
       ...attachment
     };
@@ -266,6 +271,7 @@ export class ChatClient {
         "content-type": "application/json"
       },
       body: JSON.stringify({
+        clientMessageId,
         deviceId: this.options.device.deviceId,
         conversationId,
         kind,

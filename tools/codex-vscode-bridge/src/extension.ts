@@ -104,6 +104,7 @@ type CodexTurn = {
 const EXTENSION_KEY_DEVICE_ID = "chatSoftCodexBridge.deviceId";
 const EXTENSION_KEY_STATE = "chatSoftCodexBridge.state";
 const CONTROL_AGENT_ID = "codex-agent";
+const THREAD_ID_PATTERN = /\b([0-9a-f]{12,})\b/i;
 
 class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -315,6 +316,20 @@ class ChatSoftCodexBridge {
     void vscode.window.showInformationMessage("Selected Codex thread cleared.");
   }
 
+  async bindCurrentThread() {
+    const state = this.readState();
+    const threadId = await this.resolveCurrentVisibleThreadId();
+    if (!threadId) {
+      throw new Error("没有找到当前活动的 Codex 线程。请先在 VS Code 里点开你要绑定的 Codex 会话页签。");
+    }
+
+    state.selectedThreadId = threadId;
+    await this.writeState(state);
+    const thread = await this.readThreadMeta(threadId);
+    await this.sendThreadContext(threadId, `已绑定当前 VS Code 会话：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`);
+    this.log(`Bound current visible Codex thread -> ${threadId}`);
+  }
+
   private config() {
     const cfg = vscode.workspace.getConfiguration("chatSoftCodexBridge");
     return {
@@ -491,6 +506,8 @@ class ChatSoftCodexBridge {
           continue;
         }
         seen.add(message.id);
+        state.processedMessageIds = [...seen].slice(-500);
+        await this.writeState(state);
 
         if (message.senderDeviceId === this.agentDeviceId) {
           continue;
@@ -510,24 +527,24 @@ class ChatSoftCodexBridge {
 
   private async handleIncomingMessage(message: ChatSoftMessage, state: BridgeState) {
     if (message.kind !== "text" || !message.text?.trim()) {
-      await this.sendText("当前 Codex Bridge 版本先只支持文本消息。");
+      await this.sendText("当前 Codex Bridge 版本先只支持文本消息。", `bridge-unsupported:${message.id}`);
       return;
     }
 
     const text = message.text.trim();
-    if (await this.handleCommand(text, state)) {
+    if (await this.handleCommand(text, state, message.id)) {
       return;
     }
 
     const threadId = await this.ensureSelectedThread(state);
     const reply = await this.sendTurn(threadId, text, state.selectedModelId);
-    await this.sendText(reply);
+    await this.sendText(reply, `bridge-reply:${message.id}`);
   }
 
-  private async handleCommand(text: string, state: BridgeState) {
+  private async handleCommand(text: string, state: BridgeState, sourceMessageId: string) {
     if (/^\/models$/i.test(text)) {
       const models = await this.listModels();
-      await this.sendText(`可用模型：\n${models.map((model) => `- ${model.id}`).join("\n")}`);
+      await this.sendText(`可用模型：\n${models.map((model) => `- ${model.id}`).join("\n")}`, `bridge-cmd-models:${sourceMessageId}`);
       return true;
     }
 
@@ -536,18 +553,18 @@ class ChatSoftCodexBridge {
       const modelId = modelMatch[1].trim();
       const models = await this.listModels();
       if (!models.some((item) => item.id === modelId)) {
-        await this.sendText(`没有找到模型 ${modelId}。先发 /models 查看。`);
+        await this.sendText(`没有找到模型 ${modelId}。先发 /models 查看。`, `bridge-cmd-model-missing:${sourceMessageId}`);
         return true;
       }
       state.selectedModelId = modelId;
-      await this.sendText(`已切换到模型：${modelId}`);
+      await this.sendText(`已切换到模型：${modelId}`, `bridge-cmd-model-set:${sourceMessageId}`);
       return true;
     }
 
     if (/^\/threads$/i.test(text)) {
       const threads = await this.listRecentThreads();
       if (threads.length === 0) {
-        await this.sendText("当前没有可用的 Codex 线程。");
+        await this.sendText("当前没有可用的 Codex 线程。", `bridge-cmd-threads-empty:${sourceMessageId}`);
         return true;
       }
 
@@ -555,17 +572,40 @@ class ChatSoftCodexBridge {
         const current = state.selectedThreadId === thread.id ? " [当前]" : "";
         return `${index + 1}. ${this.describeThread(thread)} (${thread.id.slice(0, 8)})${current}`;
       });
-      await this.sendText(`最近 Codex 线程：\n${lines.join("\n")}\n\n使用 /use <编号|前缀|latest|new> 切换。`);
+      await this.sendText(
+        `最近 Codex 线程：\n${lines.join("\n")}\n\n使用 /use <编号|前缀|latest|new> 切换。`,
+        `bridge-cmd-threads:${sourceMessageId}`
+      );
       return true;
     }
 
     if (/^\/current$/i.test(text)) {
       if (!state.selectedThreadId) {
-        await this.sendText("当前还没有选中的线程。");
+        await this.sendText("当前还没有选中的线程。", `bridge-cmd-current-empty:${sourceMessageId}`);
         return true;
       }
       const thread = await this.readThreadMeta(state.selectedThreadId);
-      await this.sendText(`当前线程：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`);
+      await this.sendText(`当前线程：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`, `bridge-cmd-current:${sourceMessageId}`);
+      return true;
+    }
+
+    if (/^\/bind-current$/i.test(text)) {
+      const threadId = await this.resolveCurrentVisibleThreadId();
+      if (!threadId) {
+        await this.sendText(
+          "没有找到当前活动的 Codex 会话。请先在 VS Code 里切到你要绑定的那条 Codex 线程，再发 /bind-current。",
+          `bridge-cmd-bind-missing:${sourceMessageId}`
+        );
+        return true;
+      }
+
+      state.selectedThreadId = threadId;
+      const thread = await this.readThreadMeta(threadId);
+      await this.sendThreadContext(
+        threadId,
+        `已绑定当前 VS Code 会话：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`,
+        `bridge-cmd-bind:${sourceMessageId}`
+      );
       return true;
     }
 
@@ -593,18 +633,25 @@ class ChatSoftCodexBridge {
       }
 
       if (!picked) {
-        await this.sendText("没有找到对应线程。先发 /threads 看列表。");
+        await this.sendText("没有找到对应线程。先发 /threads 看列表。", `bridge-cmd-use-missing:${sourceMessageId}`);
         return true;
       }
 
       state.selectedThreadId = picked.id;
-      await this.sendThreadContext(picked.id, `已切换到线程：${this.describeThread(picked)} (${picked.id.slice(0, 8)})`);
+      await this.sendThreadContext(
+        picked.id,
+        `已切换到线程：${this.describeThread(picked)} (${picked.id.slice(0, 8)})`,
+        `bridge-cmd-use:${sourceMessageId}`
+      );
       return true;
     }
 
     if (/^\/reset$/i.test(text)) {
       state.selectedThreadId = null;
-      await this.sendText("已清空当前线程选择。下一条普通消息会自动接到最近线程，没有的话就新建。");
+      await this.sendText(
+        "已清空当前线程选择。下一条普通消息会自动接到最近线程，没有的话就新建。",
+        `bridge-cmd-reset:${sourceMessageId}`
+      );
       return true;
     }
 
@@ -671,6 +718,18 @@ class ChatSoftCodexBridge {
   }
 
   private async ensureSelectedThread(state: BridgeState) {
+    const currentVisibleThreadId = await this.resolveCurrentVisibleThreadId();
+    if (currentVisibleThreadId && currentVisibleThreadId !== state.selectedThreadId) {
+      state.selectedThreadId = currentVisibleThreadId;
+      const thread = await this.readThreadMeta(currentVisibleThreadId);
+      await this.sendThreadContext(
+        currentVisibleThreadId,
+        `已自动绑定当前 VS Code 会话：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`,
+        `bridge-auto-bind:${currentVisibleThreadId}`
+      );
+      return currentVisibleThreadId;
+    }
+
     if (state.selectedThreadId) {
       return state.selectedThreadId;
     }
@@ -678,13 +737,21 @@ class ChatSoftCodexBridge {
     const latest = (await this.listRecentThreads())[0];
     if (latest) {
       state.selectedThreadId = latest.id;
-      await this.sendThreadContext(latest.id, `已自动接入最近线程：${this.describeThread(latest)} (${latest.id.slice(0, 8)})`);
+      await this.sendThreadContext(
+        latest.id,
+        `已自动接入最近线程：${this.describeThread(latest)} (${latest.id.slice(0, 8)})`,
+        `bridge-auto-latest:${latest.id}`
+      );
       return latest.id;
     }
 
     const thread = await this.startNewThread(state.selectedModelId);
     state.selectedThreadId = thread.id;
-    await this.sendThreadContext(thread.id, `已自动新建线程：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`);
+    await this.sendThreadContext(
+      thread.id,
+      `已自动新建线程：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`,
+      `bridge-auto-new:${thread.id}`
+    );
     return thread.id;
   }
 
@@ -730,7 +797,7 @@ class ChatSoftCodexBridge {
     });
   }
 
-  private async sendThreadContext(threadId: string, intro: string) {
+  private async sendThreadContext(threadId: string, intro: string, clientMessageId?: string) {
     const thread = await this.readThreadWithTurns(threadId);
     const snippets: string[] = [];
     const recentTurns = thread.turns.slice(-4);
@@ -763,16 +830,17 @@ class ChatSoftCodexBridge {
       snippets.length > 0
         ? `${intro}\n\n当前手机会话已切到这个 Codex 线程。最近上下文：\n${snippets.slice(-8).join("\n")}`
         : `${intro}\n\n当前手机会话已切到这个 Codex 线程。这个线程暂时还没有可回显的历史内容。`;
-    await this.sendText(body);
+    await this.sendText(body, clientMessageId);
   }
 
-  private async sendText(text: string) {
+  private async sendText(text: string, clientMessageId?: string) {
     await this.fetchJson(`${this.config().serverBaseUrl}/api/messages/text`, {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
       body: JSON.stringify({
+        clientMessageId,
         deviceId: this.agentDeviceId,
         conversationId: this.conversationId,
         text
@@ -847,6 +915,79 @@ class ChatSoftCodexBridge {
     return "codex";
   }
 
+  private async resolveCurrentVisibleThreadId() {
+    const candidates: string[] = [];
+
+    const tabGroups = (vscode.window as unknown as { tabGroups?: any }).tabGroups;
+    if (!tabGroups) {
+      return null;
+    }
+
+    const activeTab = tabGroups.activeTabGroup?.activeTab;
+    if (activeTab) {
+      candidates.push(...this.extractThreadCandidatesFromTab(activeTab));
+    }
+
+    for (const group of tabGroups.all ?? []) {
+      for (const tab of group.tabs) {
+        if (tab.isActive || tab.isDirty || tab.isPinned || tab.label.toLowerCase().includes("codex")) {
+          candidates.push(...this.extractThreadCandidatesFromTab(tab));
+        }
+      }
+    }
+
+    const seen = new Set<string>();
+    for (const candidate of candidates) {
+      if (!candidate || seen.has(candidate)) {
+        continue;
+      }
+      seen.add(candidate);
+      try {
+        const thread = await this.readThreadMeta(candidate);
+        if (thread?.id) {
+          return thread.id;
+        }
+      } catch (error) {
+        this.log(`Ignoring visible thread candidate ${candidate}: ${String(error)}`);
+      }
+    }
+
+    return null;
+  }
+
+  private extractThreadCandidatesFromTab(tab: any) {
+    const candidates: string[] = [];
+    const input = tab.input;
+
+    if (input?.uri) {
+      candidates.push(...this.extractThreadCandidatesFromValue(String(input.uri)));
+      candidates.push(...this.extractThreadCandidatesFromValue(String(input.uri.path ?? "")));
+    } else if (input?.modified || input?.original) {
+      candidates.push(...this.extractThreadCandidatesFromValue(String(input.modified ?? "")));
+      candidates.push(...this.extractThreadCandidatesFromValue(String(input.original ?? "")));
+    } else if (input?.viewType || input?.webviewId) {
+      candidates.push(...this.extractThreadCandidatesFromValue(tab.label));
+    } else {
+      candidates.push(...this.extractThreadCandidatesFromValue(tab.label));
+    }
+
+    return candidates;
+  }
+
+  private extractThreadCandidatesFromValue(value: string) {
+    const candidates: string[] = [];
+    if (!value) {
+      return candidates;
+    }
+
+    let match: RegExpExecArray | null;
+    const regex = new RegExp(THREAD_ID_PATTERN.source, "gi");
+    while ((match = regex.exec(value)) !== null) {
+      candidates.push(match[1]);
+    }
+    return candidates;
+  }
+
   private log(message: string) {
     this.output.appendLine(`[${new Date().toLocaleTimeString()}] ${message}`);
   }
@@ -869,6 +1010,10 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
     vscode.commands.registerCommand("chatSoftCodexBridge.resetHistory", async () => {
       await bridge.resetHistory();
+    }),
+    vscode.commands.registerCommand("chatSoftCodexBridge.bindCurrentThread", async () => {
+      await bridge.bindCurrentThread();
+      void vscode.window.showInformationMessage("Chat Soft Codex bridge bound to the current Codex thread.");
     })
   );
 
