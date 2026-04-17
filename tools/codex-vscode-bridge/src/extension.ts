@@ -41,6 +41,23 @@ type ChatSoftMessagesResponse = {
   messages: ChatSoftMessage[];
 };
 
+type ChatSoftConversationResponse = {
+  conversations: Array<{
+    conversationId: string;
+    title: string;
+    type: string;
+    updatedAt: string;
+    agentId?: string;
+    agentState?: {
+      provider: "codex";
+      selectedThreadId?: string | null;
+      selectedModelId?: string;
+      threadTitle?: string;
+      lastSyncedAt: string;
+    };
+  }>;
+};
+
 type BridgeState = {
   processedMessageIds: string[];
   selectedModelId: string;
@@ -277,6 +294,8 @@ class ChatSoftCodexBridge {
     await this.cleanupLegacyAgents();
     this.log("Registering control agent...");
     await this.registerControlAgent();
+    this.log("Loading remote conversation state...");
+    await this.loadRemoteConversationState();
     this.log("Seeding processed messages...");
     await this.seedProcessedMessages();
     this.log("Scheduling polling loop...");
@@ -327,6 +346,7 @@ class ChatSoftCodexBridge {
     await this.writeState(state);
     const thread = await this.readThreadMeta(threadId);
     await this.sendThreadContext(threadId, `已绑定当前 VS Code 会话：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`);
+    await this.syncConversationState(state, thread);
     this.log(`Bound current visible Codex thread -> ${threadId}`);
   }
 
@@ -450,6 +470,35 @@ class ChatSoftCodexBridge {
     this.log(`Registered control agent -> ${this.conversationId}`);
   }
 
+  private async loadRemoteConversationState() {
+    if (!this.conversationId) {
+      return;
+    }
+
+    const payload = await this.fetchJson<ChatSoftConversationResponse>(`${this.config().serverBaseUrl}/api/conversations`);
+    const conversation = payload.conversations.find((item) => item.conversationId === this.conversationId);
+    if (!conversation?.agentState || conversation.agentState.provider !== "codex") {
+      return;
+    }
+
+    const state = this.readState();
+    let changed = false;
+    if (conversation.agentState.selectedModelId && conversation.agentState.selectedModelId !== state.selectedModelId) {
+      state.selectedModelId = conversation.agentState.selectedModelId;
+      changed = true;
+    }
+    if (conversation.agentState.selectedThreadId && conversation.agentState.selectedThreadId !== state.selectedThreadId) {
+      state.selectedThreadId = conversation.agentState.selectedThreadId;
+      changed = true;
+    }
+    if (changed) {
+      await this.writeState(state);
+      this.log(
+        `Loaded remote state: model=${state.selectedModelId}, thread=${state.selectedThreadId?.slice(0, 8) || "none"}`
+      );
+    }
+  }
+
   private async cleanupLegacyAgents() {
     const response = await this.fetchJson<ChatSoftAgentsResponse>(`${this.config().serverBaseUrl}/api/agents`);
     const legacyAgents = response.agents.filter((agent) => {
@@ -557,6 +606,8 @@ class ChatSoftCodexBridge {
         return true;
       }
       state.selectedModelId = modelId;
+      await this.writeState(state);
+      await this.syncConversationState(state);
       await this.sendText(`已切换到模型：${modelId}`, `bridge-cmd-model-set:${sourceMessageId}`);
       return true;
     }
@@ -601,11 +652,13 @@ class ChatSoftCodexBridge {
 
       state.selectedThreadId = threadId;
       const thread = await this.readThreadMeta(threadId);
+      await this.writeState(state);
       await this.sendThreadContext(
         threadId,
         `已绑定当前 VS Code 会话：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`,
         `bridge-cmd-bind:${sourceMessageId}`
       );
+      await this.syncConversationState(state, thread);
       return true;
     }
 
@@ -615,7 +668,9 @@ class ChatSoftCodexBridge {
       if (/^new$/i.test(target)) {
         const thread = await this.startNewThread(state.selectedModelId);
         state.selectedThreadId = thread.id;
+        await this.writeState(state);
         await this.sendThreadContext(thread.id, `已新建并切换到线程：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`);
+        await this.syncConversationState(state, thread);
         return true;
       }
 
@@ -638,16 +693,20 @@ class ChatSoftCodexBridge {
       }
 
       state.selectedThreadId = picked.id;
+      await this.writeState(state);
       await this.sendThreadContext(
         picked.id,
         `已切换到线程：${this.describeThread(picked)} (${picked.id.slice(0, 8)})`,
         `bridge-cmd-use:${sourceMessageId}`
       );
+      await this.syncConversationState(state, picked);
       return true;
     }
 
     if (/^\/reset$/i.test(text)) {
       state.selectedThreadId = null;
+      await this.writeState(state);
+      await this.syncConversationState(state);
       await this.sendText(
         "已清空当前线程选择。下一条普通消息会自动接到最近线程，没有的话就新建。",
         `bridge-cmd-reset:${sourceMessageId}`
@@ -722,11 +781,13 @@ class ChatSoftCodexBridge {
     if (currentVisibleThreadId && currentVisibleThreadId !== state.selectedThreadId) {
       state.selectedThreadId = currentVisibleThreadId;
       const thread = await this.readThreadMeta(currentVisibleThreadId);
+      await this.writeState(state);
       await this.sendThreadContext(
         currentVisibleThreadId,
         `已自动绑定当前 VS Code 会话：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`,
         `bridge-auto-bind:${currentVisibleThreadId}`
       );
+      await this.syncConversationState(state, thread);
       return currentVisibleThreadId;
     }
 
@@ -737,21 +798,25 @@ class ChatSoftCodexBridge {
     const latest = (await this.listRecentThreads())[0];
     if (latest) {
       state.selectedThreadId = latest.id;
+      await this.writeState(state);
       await this.sendThreadContext(
         latest.id,
         `已自动接入最近线程：${this.describeThread(latest)} (${latest.id.slice(0, 8)})`,
         `bridge-auto-latest:${latest.id}`
       );
+      await this.syncConversationState(state, latest);
       return latest.id;
     }
 
     const thread = await this.startNewThread(state.selectedModelId);
     state.selectedThreadId = thread.id;
+    await this.writeState(state);
     await this.sendThreadContext(
       thread.id,
       `已自动新建线程：${this.describeThread(thread)} (${thread.id.slice(0, 8)})`,
       `bridge-auto-new:${thread.id}`
     );
+    await this.syncConversationState(state, thread);
     return thread.id;
   }
 
@@ -844,6 +909,34 @@ class ChatSoftCodexBridge {
         deviceId: this.agentDeviceId,
         conversationId: this.conversationId,
         text
+      })
+    });
+  }
+
+  private async syncConversationState(state: BridgeState, thread?: CodexThread | null) {
+    if (!this.conversationId) {
+      return;
+    }
+
+    let resolvedThread = thread ?? null;
+    if (!resolvedThread && state.selectedThreadId) {
+      try {
+        resolvedThread = await this.readThreadMeta(state.selectedThreadId);
+      } catch (error) {
+        this.log(`Failed to resolve thread meta for sync: ${String(error)}`);
+      }
+    }
+
+    await this.fetchJson(`${this.config().serverBaseUrl}/api/conversations/${encodeURIComponent(this.conversationId)}/agent-state`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        provider: "codex",
+        selectedThreadId: state.selectedThreadId,
+        selectedModelId: state.selectedModelId,
+        threadTitle: resolvedThread ? this.describeThread(resolvedThread) : undefined
       })
     });
   }

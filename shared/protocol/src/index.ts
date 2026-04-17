@@ -68,12 +68,21 @@ export interface AgentInfo {
   agentDeviceId: string;
 }
 
+export interface AgentConversationState {
+  provider: "codex";
+  selectedThreadId?: string | null;
+  selectedModelId?: string;
+  threadTitle?: string;
+  lastSyncedAt: string;
+}
+
 export interface ConversationSummary {
   conversationId: string;
   title: string;
   type: ConversationType;
   updatedAt: string;
   agentId?: string;
+  agentState?: AgentConversationState;
   lastMessage?: ChatMessage;
 }
 

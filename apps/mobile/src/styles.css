@@ -198,17 +198,23 @@ textarea {
   padding: 12px 10px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
+  overscroll-behavior-y: contain;
 }
 
 .chat-row {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  width: 100%;
 }
 
 .chat-row.self {
   justify-content: flex-end;
+}
+
+.chat-row.peer {
+  justify-content: flex-start;
 }
 
 .message-bubble {
@@ -216,16 +222,19 @@ textarea {
   border-radius: 18px;
   padding: 8px 10px 6px;
   box-shadow: 0 4px 18px rgba(15, 23, 42, 0.07);
+  flex-shrink: 1;
 }
 
 .message-bubble.peer {
   background: var(--qq-card);
   border-top-left-radius: 6px;
+  margin-right: auto;
 }
 
 .message-bubble.self {
   background: var(--qq-self);
   border-top-right-radius: 6px;
+  margin-left: auto;
 }
 
 .message-text {
@@ -234,6 +243,78 @@ textarea {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.text-message-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.long-text-card {
+  display: grid;
+  gap: 8px;
+}
+
+.message-text-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.long-text-toggle {
+  justify-self: flex-start;
+  border: none;
+  background: rgba(255, 255, 255, 0.58);
+  color: var(--qq-blue-deep);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.code-block-card {
+  overflow: hidden;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #e5eef9;
+}
+
+.code-block-header {
+  width: 100%;
+  border: none;
+  background: rgba(15, 23, 42, 0.96);
+  color: inherit;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  text-align: left;
+}
+
+.code-block-meta {
+  display: grid;
+  gap: 2px;
+}
+
+.code-block-meta strong {
+  font-size: 13px;
+}
+
+.code-block-meta span,
+.code-block-toggle {
+  font-size: 12px;
+  color: #93c5fd;
+}
+
+.code-block-body {
+  margin: 0;
+  padding: 0 12px 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
 }
 
 .attachment-card {
@@ -298,6 +379,15 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.message-side-spacer {
+  width: 34px;
+  flex: 0 0 34px;
+}
+
+.self-avatar {
+  background: linear-gradient(135deg, #2fb5ff, #1d7ff2);
 }
 
 .ghost-action {

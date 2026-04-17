@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { ChatClient, createId } from "@chat-soft/core";
 import type { AgentInfo, ChatMessage, ConversationSummary, DeviceInfo } from "@chat-soft/protocol";
 
@@ -15,6 +15,7 @@ const commandSuggestions = [
   { command: "/models", label: "查看模型", description: "列出当前可用模型" },
   { command: "/model gpt-5.4", label: "切换到 gpt-5.4", description: "把当前模型切到 gpt-5.4" },
   { command: "/threads", label: "查看线程", description: "列出最近 Codex 线程" },
+  { command: "/bind-current", label: "绑定当前线程", description: "绑定到 VS Code 当前打开的 Codex 会话" },
   { command: "/use latest", label: "切到最近线程", description: "切换到最近使用的线程" },
   { command: "/use new", label: "新建线程", description: "创建一个新的 Codex 线程" },
   { command: "/current", label: "当前线程", description: "查看当前绑定的线程" },
@@ -29,6 +30,20 @@ type PreviewState =
       mimeType?: string;
     }
   | null;
+
+type TextBlock =
+  | {
+      type: "text";
+      content: string;
+    }
+  | {
+      type: "code";
+      content: string;
+      language: string;
+    };
+
+const LONG_TEXT_COLLAPSE_LENGTH = 220;
+const LONG_TEXT_COLLAPSE_LINES = 8;
 
 function formatClock(value?: string) {
   if (!value) return "";
@@ -56,6 +71,20 @@ function messagePreview(message?: ChatMessage) {
   return `[文件] ${message.fileName}`;
 }
 
+function formatAgentStateSummary(conversation: ConversationSummary, agent?: AgentInfo) {
+  if (conversation.agentState?.provider === "codex") {
+    const pieces = ["Codex 已同步"];
+    if (conversation.agentState.selectedModelId) {
+      pieces.push(conversation.agentState.selectedModelId);
+    }
+    if (conversation.agentState.threadTitle) {
+      pieces.push(conversation.agentState.threadTitle);
+    }
+    return pieces.join(" · ");
+  }
+  return agent ? agent.description || "Agent 好友" : "本机设备";
+}
+
 function triggerDownload(url: string, fileName: string) {
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -69,6 +98,120 @@ function triggerDownload(url: string, fileName: string) {
 
 function openExternal(url: string) {
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function parseTextBlocks(text: string) {
+  const blocks: TextBlock[] = [];
+  const source = text ?? "";
+  const fencePattern = /```([^\n`]*)\n([\s\S]*?)```/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = fencePattern.exec(source)) !== null) {
+    if (match.index > lastIndex) {
+      const textContent = source.slice(lastIndex, match.index);
+      if (textContent.trim()) {
+        blocks.push({
+          type: "text",
+          content: textContent.trim()
+        });
+      }
+    }
+
+    blocks.push({
+      type: "code",
+      language: match[1].trim(),
+      content: match[2].replace(/\s+$/, "")
+    });
+    lastIndex = match.index + match[0].length;
+  }
+
+  const trailing = source.slice(lastIndex);
+  if (trailing.trim()) {
+    blocks.push({
+      type: "text",
+      content: trailing.trim()
+    });
+  }
+
+  if (blocks.length === 0) {
+    blocks.push({
+      type: "text",
+      content: source
+    });
+  }
+
+  return blocks;
+}
+
+function shouldCollapseLongText(text: string) {
+  const normalized = text.trim();
+  if (!normalized) return false;
+  const lineCount = normalized.split(/\r?\n/).length;
+  return normalized.length > LONG_TEXT_COLLAPSE_LENGTH || lineCount > LONG_TEXT_COLLAPSE_LINES;
+}
+
+function CodeBlock({ block }: { block: Extract<TextBlock, { type: "code" }> }) {
+  const [expanded, setExpanded] = useState(false);
+  const lineCount = block.content.split(/\r?\n/).length;
+  const title = block.language || "代码/命令";
+
+  return (
+    <div className="code-block-card">
+      <button type="button" className="code-block-header" onClick={() => setExpanded((current) => !current)}>
+        <div className="code-block-meta">
+          <strong>{title}</strong>
+          <span>{lineCount} 行</span>
+        </div>
+        <span className="code-block-toggle">{expanded ? "收起" : "展开"}</span>
+      </button>
+      {expanded && (
+        <pre className="code-block-body">
+          <code>{block.content}</code>
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function CollapsibleText({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = shouldCollapseLongText(text);
+
+  if (!collapsible) {
+    return <p className="message-text">{text}</p>;
+  }
+
+  return (
+    <div className="long-text-card">
+      <p className={`message-text ${expanded ? "" : "message-text-clamped"}`}>{text}</p>
+      <button type="button" className="long-text-toggle" onClick={() => setExpanded((current) => !current)}>
+        {expanded ? "收起全文" : "展开全文"}
+      </button>
+    </div>
+  );
+}
+
+function TextMessageBody({ text, isSelf }: { text?: string; isSelf: boolean }) {
+  const blocks = useMemo(() => parseTextBlocks(text ?? ""), [text]);
+
+  return (
+    <div className="text-message-stack">
+      {blocks.map((block, index) => (
+        <Fragment key={`${block.type}-${index}`}>
+          {block.type === "text" ? (
+            isSelf ? (
+              <CollapsibleText text={block.content} />
+            ) : (
+              <p className="message-text">{block.content}</p>
+            )
+          ) : (
+            <CodeBlock block={block} />
+          )}
+        </Fragment>
+      ))}
+    </div>
+  );
 }
 
 function renderAttachmentActions(message: Extract<ChatMessage, { mediaUrl: string }>, onPreview: (preview: PreviewState) => void) {
@@ -103,9 +246,9 @@ function renderAttachmentActions(message: Extract<ChatMessage, { mediaUrl: strin
   );
 }
 
-function renderMessageBody(message: ChatMessage, onPreview: (preview: PreviewState) => void) {
+function renderMessageBody(message: ChatMessage, onPreview: (preview: PreviewState) => void, isSelf: boolean) {
   if (message.kind === "text") {
-    return <p className="message-text">{message.text}</p>;
+    return <TextMessageBody text={message.text} isSelf={isSelf} />;
   }
 
   if (message.kind === "voice" || message.kind === "audio") {
@@ -235,6 +378,8 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
   const startedAtRef = useRef<number>(0);
   const filePickerRef = useRef<HTMLInputElement | null>(null);
   const messageEndRef = useRef<HTMLDivElement | null>(null);
+  const chatListRef = useRef<HTMLElement | null>(null);
+  const lastAutoScrollMessageIdRef = useRef<string>("");
 
   const deviceId = useMemo(() => {
     const existing = localStorage.getItem("chatsoft.mobile.deviceId");
@@ -329,7 +474,19 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
 
   useEffect(() => {
     if (!chatOpen) return;
-    messageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const container = chatListRef.current;
+    const lastMessageId = visibleMessages.at(-1)?.id ?? "";
+    if (!container || !lastMessageId || lastAutoScrollMessageIdRef.current === lastMessageId) {
+      return;
+    }
+
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const shouldStickToBottom = distanceFromBottom < 120;
+    lastAutoScrollMessageIdRef.current = lastMessageId;
+
+    if (shouldStickToBottom) {
+      messageEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    }
   }, [chatOpen, visibleMessages]);
 
   async function startRecording() {
@@ -382,7 +539,7 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
     return {
       ...conversation,
       displayTitle: boundAgent?.name ?? conversation.title,
-      displaySubtitle: boundAgent ? boundAgent.description || "Agent 好友" : "本机设备"
+      displaySubtitle: formatAgentStateSummary(conversation, boundAgent)
     };
   }).filter((conversation) => {
     const boundAgent = agentMap.get(conversation.conversationId);
@@ -467,11 +624,24 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
             </button>
             <div className="chat-title-block">
               <strong>{activeConversation ? agentMap.get(activeConversation.conversationId)?.name ?? activeConversation.title : "聊天"}</strong>
-              <span>{agentMap.get(activeConversationId)?.status === "online" ? "在线" : "会话中"}</span>
+              <span>
+                {activeConversation?.agentState?.provider === "codex"
+                  ? `${activeConversation.agentState.selectedModelId || "Codex"} · ${
+                      activeConversation.agentState.threadTitle || "未绑定线程"
+                    }`
+                  : agentMap.get(activeConversationId)?.status === "online"
+                    ? "在线"
+                    : "会话中"}
+              </span>
             </div>
           </header>
 
-          <main className="chat-message-list">
+          <main
+            className="chat-message-list"
+            ref={(node) => {
+              chatListRef.current = node;
+            }}
+          >
             {visibleMessages.map((message) => {
               const isSelf = message.senderDeviceId === deviceId;
               return (
@@ -481,9 +651,11 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
                       {avatarText(activeConversation ? agentMap.get(activeConversation.conversationId)?.name ?? activeConversation.title : "A")}
                     </div>
                   )}
+                  {isSelf && <div className="message-side-spacer" aria-hidden="true"></div>}
                   <div className={`message-bubble ${isSelf ? "self" : "peer"}`}>
-                    {renderMessageBody(message, setPreview)}
+                    {renderMessageBody(message, setPreview, isSelf)}
                   </div>
+                  {isSelf && <div className="message-avatar self-avatar">我</div>}
                 </div>
               );
             })}

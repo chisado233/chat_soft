@@ -1,5 +1,6 @@
 import type {
   AgentInfo,
+  AgentConversationState,
   AttachmentPayload,
   ChatMessage,
   ClientToServerEvent,
@@ -177,6 +178,20 @@ export class ChatClient {
           : conversation.lastMessage
       }))
     };
+  }
+
+  async updateConversationAgentState(conversationId: string, agentState: AgentConversationState) {
+    const response = await fetch(`${this.options.serverBaseUrl}/api/conversations/${encodeURIComponent(conversationId)}/agent-state`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(agentState)
+    });
+    if (!response.ok) {
+      throw new Error("更新会话同步状态失败");
+    }
+    return (await response.json()) as { ok: boolean; conversation: ConversationSummary };
   }
 
   async fetchConversationMessages(conversationId: string) {

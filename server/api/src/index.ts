@@ -9,6 +9,7 @@ import { pipeline } from "node:stream/promises";
 import { nanoid } from "nanoid";
 import type {
   AgentInfo,
+  AgentConversationState,
   AttachmentPayload,
   ChatMessage,
   ClientToServerEvent,
@@ -47,6 +48,13 @@ type AttachmentMessageBody = {
   conversationId?: string;
   kind: "audio" | "image" | "video" | "file";
 } & AttachmentPayload;
+
+type UpdateConversationAgentStateBody = {
+  provider: "codex";
+  selectedThreadId?: string | null;
+  selectedModelId?: string;
+  threadTitle?: string;
+};
 
 const app = Fastify({ logger: true });
 const dataDir = join(process.cwd(), "data");
@@ -141,6 +149,10 @@ function touchConversation(db: PersistedDb, conversationId: string, lastMessage?
 
 function sortMessages(messages: ChatMessage[]) {
   return [...messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+function conversationTitleForAgent(agent: AgentInfo | undefined, conversation: ConversationSummary) {
+  return agent?.name || conversation.title || conversation.conversationId;
 }
 
 function listConversations(db: PersistedDb) {
@@ -317,6 +329,39 @@ app.get("/api/conversations", async () => {
   saveDb(db);
   return {
     conversations: listConversations(db)
+  };
+});
+
+app.patch<{
+  Params: { conversationId: string };
+  Body: UpdateConversationAgentStateBody;
+}>("/api/conversations/:conversationId/agent-state", async (request, reply) => {
+  const db = loadDb();
+  const conversation = db.conversations.find((item) => item.conversationId === request.params.conversationId);
+  if (!conversation) {
+    return reply.code(404).send({ message: "会话不存在" });
+  }
+
+  const nextState: AgentConversationState = {
+    provider: "codex",
+    selectedThreadId: request.body.selectedThreadId ?? null,
+    selectedModelId: request.body.selectedModelId?.trim() || undefined,
+    threadTitle: request.body.threadTitle?.trim() || undefined,
+    lastSyncedAt: new Date().toISOString()
+  };
+
+  conversation.agentState = nextState;
+  const agent = db.agents.find((item) => item.conversationId === conversation.conversationId);
+  const titleBase = conversationTitleForAgent(agent, conversation);
+  if (nextState.threadTitle) {
+    conversation.title = `${titleBase}`;
+  } else if (agent?.name) {
+    conversation.title = agent.name;
+  }
+  saveDb(db);
+  return {
+    ok: true,
+    conversation
   };
 });
 
