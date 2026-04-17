@@ -1,0 +1,114 @@
+{
+  "name": "chat-soft-codex-bridge",
+  "displayName": "Chat Soft Codex Bridge",
+  "description": "Bridge Chat Soft mobile conversations into VS Code Codex-compatible language models and send replies back.",
+  "version": "0.1.5",
+  "publisher": "local",
+  "private": true,
+  "engines": {
+    "vscode": "^1.104.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:chatSoftCodexBridge.start",
+    "onCommand:chatSoftCodexBridge.stop",
+    "onCommand:chatSoftCodexBridge.showModels",
+    "onCommand:chatSoftCodexBridge.resetHistory"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "chatSoftCodexBridge.start",
+        "title": "Chat Soft Codex: Start Bridge"
+      },
+      {
+        "command": "chatSoftCodexBridge.stop",
+        "title": "Chat Soft Codex: Stop Bridge"
+      },
+      {
+        "command": "chatSoftCodexBridge.showModels",
+        "title": "Chat Soft Codex: Show Available Models"
+      },
+      {
+        "command": "chatSoftCodexBridge.resetHistory",
+        "title": "Chat Soft Codex: Reset Conversation History"
+      }
+    ],
+    "configuration": {
+      "title": "Chat Soft Codex Bridge",
+      "properties": {
+        "chatSoftCodexBridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically start the bridge when VS Code finishes starting."
+        },
+        "chatSoftCodexBridge.serverBaseUrl": {
+          "type": "string",
+          "default": "http://39.106.125.149:3000",
+          "description": "Chat Soft server base URL."
+        },
+        "chatSoftCodexBridge.agentId": {
+          "type": "string",
+          "default": "codex-agent",
+          "description": "Agent ID registered in Chat Soft."
+        },
+        "chatSoftCodexBridge.agentName": {
+          "type": "string",
+          "default": "Codex Agent",
+          "description": "Agent display name shown in Chat Soft."
+        },
+        "chatSoftCodexBridge.agentDescription": {
+          "type": "string",
+          "default": "VS Code 中的 Codex 会话桥接代理",
+          "description": "Agent description shown in Chat Soft."
+        },
+        "chatSoftCodexBridge.pollIntervalMs": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 1000,
+          "description": "Polling interval used to fetch new Chat Soft messages."
+        },
+        "chatSoftCodexBridge.preferredModelId": {
+          "type": "string",
+          "default": "gpt-5.4",
+          "description": "Preferred Codex model ID."
+        },
+        "chatSoftCodexBridge.historyMessageLimit": {
+          "type": "number",
+          "default": 20,
+          "minimum": 2,
+          "description": "How many turns of local history to keep for the mobile Codex conversation."
+        },
+        "chatSoftCodexBridge.codexExecutable": {
+          "type": "string",
+          "default": "",
+          "description": "Optional full path to codex.exe. Leave empty to reuse the executable bundled with the OpenAI Codex VS Code extension."
+        },
+        "chatSoftCodexBridge.workspaceRoot": {
+          "type": "string",
+          "default": "D:\\agent_workspace",
+          "description": "Workspace directory passed to the Codex CLI for this bridge conversation."
+        },
+        "chatSoftCodexBridge.proxyUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional explicit proxy URL for Codex CLI. Leave empty to reuse VS Code's http.proxy setting."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./tsconfig.json",
+    "watch": "tsc -w -p ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.1",
+    "@vscode/vsce": "^3.9.0",
+    "typescript": "^5.9.3",
+    "vscode": "^1.1.37"
+  }
+}

@@ -9,37 +9,206 @@ const attachmentPickerMap = {
   file: "*/*"
 } as const;
 
+type AttachmentKind = keyof typeof attachmentPickerMap;
+
+const commandSuggestions = [
+  { command: "/models", label: "查看模型", description: "列出当前可用模型" },
+  { command: "/model gpt-5.4", label: "切换到 gpt-5.4", description: "把当前模型切到 gpt-5.4" },
+  { command: "/threads", label: "查看线程", description: "列出最近 Codex 线程" },
+  { command: "/use latest", label: "切到最近线程", description: "切换到最近使用的线程" },
+  { command: "/use new", label: "新建线程", description: "创建一个新的 Codex 线程" },
+  { command: "/current", label: "当前线程", description: "查看当前绑定的线程" },
+  { command: "/reset", label: "重置线程选择", description: "清空当前线程绑定" }
+] as const;
+
+type PreviewState =
+  | {
+      kind: "image" | "video" | "audio" | "file";
+      url: string;
+      title: string;
+      mimeType?: string;
+    }
+  | null;
+
+function formatClock(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function avatarText(title: string) {
+  const cleaned = title.trim();
+  if (!cleaned) return "?";
+  return cleaned.slice(0, 1).toUpperCase();
+}
+
 function messagePreview(message?: ChatMessage) {
   if (!message) return "暂无消息";
   if (message.kind === "text") return message.text;
-  if (message.kind === "voice") return "[语音]";
+  if (message.kind === "voice") return "[语音消息]";
   if (message.kind === "audio") return `[音频] ${message.fileName}`;
-  if (message.kind === "image") return `[图片] ${message.fileName}`;
-  if (message.kind === "video") return `[视频] ${message.fileName}`;
+  if (message.kind === "image") return "[图片]";
+  if (message.kind === "video") return "[视频]";
   return `[文件] ${message.fileName}`;
 }
 
-function renderMessageBody(message: ChatMessage) {
+function triggerDownload(url: string, fileName: string) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.target = "_blank";
+  anchor.rel = "noreferrer";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function openExternal(url: string) {
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
+function renderAttachmentActions(message: Extract<ChatMessage, { mediaUrl: string }>, onPreview: (preview: PreviewState) => void) {
+  const previewKind = message.kind === "voice" ? "audio" : message.kind;
+  return (
+    <div className="message-actions">
+      <button
+        type="button"
+        className="ghost-action"
+        onClick={() =>
+          onPreview({
+            kind: previewKind === "voice" ? "audio" : previewKind,
+            url: message.mediaUrl,
+            title: message.fileName ?? "附件",
+            mimeType: message.mimeType
+          })
+        }
+      >
+        预览
+      </button>
+      <button type="button" className="ghost-action" onClick={() => openExternal(message.mediaUrl)}>
+        打开
+      </button>
+      <button
+        type="button"
+        className="ghost-action"
+        onClick={() => triggerDownload(message.mediaUrl, message.fileName ?? "chat-soft-attachment")}
+      >
+        下载
+      </button>
+    </div>
+  );
+}
+
+function renderMessageBody(message: ChatMessage, onPreview: (preview: PreviewState) => void) {
   if (message.kind === "text") {
-    return <p>{message.text}</p>;
+    return <p className="message-text">{message.text}</p>;
   }
+
   if (message.kind === "voice" || message.kind === "audio") {
-    return <audio controls preload="metadata" src={message.mediaUrl}></audio>;
-  }
-  if (message.kind === "image") {
     return (
-      <a href={message.mediaUrl} target="_blank" rel="noreferrer">
-        <img className="message-image" src={message.mediaUrl} alt={message.fileName} />
-      </a>
+      <div className="attachment-card audio-card">
+        <div className="attachment-title">{message.kind === "voice" ? "语音消息" : message.fileName}</div>
+        <audio className="inline-audio" controls preload="metadata" src={message.mediaUrl}></audio>
+        {renderAttachmentActions(message, onPreview)}
+      </div>
     );
   }
-  if (message.kind === "video") {
-    return <video className="message-video" controls preload="metadata" src={message.mediaUrl}></video>;
+
+  if (message.kind === "image") {
+    return (
+      <div className="attachment-card image-card">
+        <button
+          type="button"
+          className="preview-button"
+          onClick={() =>
+            onPreview({
+              kind: "image",
+              url: message.mediaUrl,
+              title: message.fileName,
+              mimeType: message.mimeType
+            })
+          }
+        >
+          <img className="message-image" src={message.mediaUrl} alt={message.fileName} />
+        </button>
+        <div className="attachment-title">{message.fileName}</div>
+        {renderAttachmentActions(message, onPreview)}
+      </div>
+    );
   }
+
+  if (message.kind === "video") {
+    return (
+      <div className="attachment-card video-card">
+        <video
+          className="message-video"
+          controls
+          preload="metadata"
+          playsInline
+          src={message.mediaUrl}
+          onClick={() =>
+            onPreview({
+              kind: "video",
+              url: message.mediaUrl,
+              title: message.fileName,
+              mimeType: message.mimeType
+            })
+          }
+        ></video>
+        <div className="attachment-title">{message.fileName}</div>
+        {renderAttachmentActions(message, onPreview)}
+      </div>
+    );
+  }
+
   return (
-    <a href={message.mediaUrl} target="_blank" rel="noreferrer" className="file-link">
-      {message.fileName}
-    </a>
+    <div className="attachment-card file-card">
+      <div className="file-icon">文</div>
+      <div className="file-meta">
+        <strong>{message.fileName}</strong>
+        <span>{message.mimeType || "application/octet-stream"}</span>
+      </div>
+      {renderAttachmentActions(message, onPreview)}
+    </div>
+  );
+}
+
+function PreviewModal({ preview, onClose }: { preview: PreviewState; onClose: () => void }) {
+  if (!preview) return null;
+  return (
+    <div className="preview-modal" onClick={onClose}>
+      <div className="preview-panel" onClick={(event) => event.stopPropagation()}>
+        <div className="preview-header">
+          <strong>{preview.title}</strong>
+          <button type="button" className="icon-button" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+        <div className="preview-body">
+          {preview.kind === "image" && <img className="preview-image" src={preview.url} alt={preview.title} />}
+          {preview.kind === "video" && <video className="preview-video" controls preload="metadata" src={preview.url}></video>}
+          {preview.kind === "audio" && <audio className="preview-audio" controls preload="metadata" src={preview.url}></audio>}
+          {preview.kind === "file" && (
+            <div className="preview-file">
+              <p>{preview.title}</p>
+              <p>{preview.mimeType ?? "未知文件类型"}</p>
+            </div>
+          )}
+        </div>
+        <div className="preview-actions">
+          <button type="button" className="primary-action" onClick={() => openExternal(preview.url)}>
+            打开
+          </button>
+          <button type="button" className="secondary-action" onClick={() => triggerDownload(preview.url, preview.title)}>
+            下载
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -55,11 +224,17 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [pickerKind, setPickerKind] = useState<keyof typeof attachmentPickerMap>("file");
+  const [pickerKind, setPickerKind] = useState<AttachmentKind>("file");
+  const [chatOpen, setChatOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showAttachmentPanel, setShowAttachmentPanel] = useState(false);
+  const [showCommandPanel, setShowCommandPanel] = useState(false);
+  const [preview, setPreview] = useState<PreviewState>(null);
   const mediaChunksRef = useRef<Blob[]>([]);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const startedAtRef = useRef<number>(0);
   const filePickerRef = useRef<HTMLInputElement | null>(null);
+  const messageEndRef = useRef<HTMLDivElement | null>(null);
 
   const deviceId = useMemo(() => {
     const existing = localStorage.getItem("chatsoft.mobile.deviceId");
@@ -85,6 +260,8 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
     });
   }, [deviceId, deviceName, platform, serverBaseUrl]);
 
+  const agentMap = useMemo(() => new Map(agents.map((agent) => [agent.conversationId, agent])), [agents]);
+
   const activeConversation = useMemo(
     () => conversations.find((conversation) => conversation.conversationId === activeConversationId) ?? null,
     [activeConversationId, conversations]
@@ -97,6 +274,18 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     [activeConversationId, allMessages]
   );
+
+  const slashSuggestions = useMemo(() => {
+    const trimmed = text.trimStart();
+    if (!trimmed.startsWith("/")) {
+      return [];
+    }
+    const query = trimmed.toLowerCase();
+    return commandSuggestions.filter((item) => {
+      const haystack = `${item.command} ${item.label} ${item.description}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [text]);
 
   useEffect(() => {
     localStorage.setItem("chatsoft.mobile.serverBaseUrl", serverBaseUrl);
@@ -138,6 +327,11 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
     };
   }, [client]);
 
+  useEffect(() => {
+    if (!chatOpen) return;
+    messageEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [chatOpen, visibleMessages]);
+
   async function startRecording() {
     if (!activeConversationId) return;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -152,12 +346,7 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
       const blob = new Blob(mediaChunksRef.current, { type: recorder.mimeType || "audio/webm" });
       const durationMs = Date.now() - startedAtRef.current;
       const uploaded = await client.uploadVoice(blob, durationMs);
-      await client.sendVoice(
-        serverBaseUrl.replace(/\/$/, "") + uploaded.mediaUrl,
-        uploaded.durationMs,
-        uploaded.mimeType,
-        activeConversationId
-      );
+      await client.sendVoice(uploaded.mediaUrl, uploaded.durationMs, uploaded.mimeType, activeConversationId);
       stream.getTracks().forEach((track) => track.stop());
     };
     recorder.start();
@@ -175,133 +364,269 @@ export function App({ platform }: { platform: DeviceInfo["platform"] }) {
     const uploaded = await client.uploadAttachment(file, pickerKind, file.name);
     await client.sendAttachment(pickerKind, uploaded, activeConversationId);
     event.target.value = "";
+    setShowAttachmentPanel(false);
   }
 
+  async function sendTextMessage(value: string) {
+    if (!activeConversationId || !value.trim()) return;
+    await client.sendText(value.trim(), activeConversationId);
+    setText("");
+  }
+
+  async function handleCommandQuickSend(command: string) {
+    await sendTextMessage(command);
+  }
+
+  const conversationItems = conversations.map((conversation) => {
+    const boundAgent = agentMap.get(conversation.conversationId);
+    return {
+      ...conversation,
+      displayTitle: boundAgent?.name ?? conversation.title,
+      displaySubtitle: boundAgent ? boundAgent.description || "Agent 好友" : "本机设备"
+    };
+  }).filter((conversation) => {
+    const boundAgent = agentMap.get(conversation.conversationId);
+    if (!boundAgent) return true;
+    if (boundAgent.agentId === "codex-agent") return true;
+    if (boundAgent.agentId === "llm-chat") return true;
+    if (boundAgent.agentId === "desktop-helper") return true;
+    if (boundAgent.agentId.startsWith("codex-thread-")) return false;
+    if (/debug/i.test(boundAgent.name)) return false;
+    return true;
+  });
+
   return (
-    <div className="mobile-shell">
-      <header className="mobile-header">
-        <h1>Chat Soft</h1>
-        <div className="inline-settings">
-          <input value={serverBaseUrl} onChange={(event) => setServerBaseUrl(event.target.value)} placeholder="服务器地址" />
-          <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} placeholder="设备名称" />
-        </div>
-      </header>
-
-      <section className="agent-strip">
-        <div className="section-title">Agent 列表</div>
-        <div className="agent-scroll">
-          {agents.map((agent) => (
-            <button
-              key={agent.agentId}
-              className={`agent-chip ${activeConversationId === agent.conversationId ? "active" : ""}`}
-              onClick={() => setActiveConversationId(agent.conversationId)}
-            >
-              <strong>{agent.name}</strong>
-              <span>{agent.status}</span>
+    <div className="qq-shell">
+      {!chatOpen && (
+        <section className="qq-list-page">
+          <header className="qq-topbar">
+            <div>
+              <div className="qq-title">消息</div>
+              <div className="qq-subtitle">一个 agent 就像一个 QQ 好友</div>
+            </div>
+            <button type="button" className="icon-button" onClick={() => setShowSettings((current) => !current)}>
+              设置
             </button>
-          ))}
-          {agents.length === 0 && <div className="empty-hint">还没有注册任何 agent</div>}
-        </div>
-      </section>
+          </header>
 
-      <main className="mobile-content">
-        <section className="conversation-list">
-          <div className="section-title">会话</div>
-          {loading && <div className="empty-hint">加载中...</div>}
-          {!loading &&
-            conversations.map((conversation) => (
-              <button
-                key={conversation.conversationId}
-                className={`conversation-card ${activeConversationId === conversation.conversationId ? "active" : ""}`}
-                onClick={() => setActiveConversationId(conversation.conversationId)}
-              >
-                <strong>{conversation.title}</strong>
-                <span>{conversation.type === "agent" ? "Agent" : "设备"}</span>
-                <small>{messagePreview(conversation.lastMessage)}</small>
+          {showSettings && (
+            <section className="settings-card">
+              <label>
+                服务器地址
+                <input value={serverBaseUrl} onChange={(event) => setServerBaseUrl(event.target.value)} placeholder="服务器地址" />
+              </label>
+              <label>
+                设备名称
+                <input value={deviceName} onChange={(event) => setDeviceName(event.target.value)} placeholder="设备名称" />
+              </label>
+            </section>
+          )}
+
+          <main className="friend-list">
+            {loading && <div className="empty-hint">加载中...</div>}
+            {!loading &&
+              conversationItems.map((conversation) => (
+                <button
+                  key={conversation.conversationId}
+                  type="button"
+                  className="friend-row"
+                  onClick={() => {
+                    setActiveConversationId(conversation.conversationId);
+                    setChatOpen(true);
+                  }}
+                >
+                  <div className="friend-avatar">{avatarText(conversation.displayTitle)}</div>
+                  <div className="friend-main">
+                    <div className="friend-line">
+                      <strong>{conversation.displayTitle}</strong>
+                      <span>{formatClock(conversation.updatedAt)}</span>
+                    </div>
+                    <div className="friend-line friend-secondary">
+                      <span>{conversation.displaySubtitle}</span>
+                      <span className="preview-text">{messagePreview(conversation.lastMessage)}</span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+          </main>
+        </section>
+      )}
+
+      {chatOpen && (
+        <section className="qq-chat-page">
+          <header className="chat-topbar">
+            <button
+              type="button"
+              className="icon-button"
+              onClick={() => {
+                setChatOpen(false);
+                setShowAttachmentPanel(false);
+              }}
+            >
+              返回
+            </button>
+            <div className="chat-title-block">
+              <strong>{activeConversation ? agentMap.get(activeConversation.conversationId)?.name ?? activeConversation.title : "聊天"}</strong>
+              <span>{agentMap.get(activeConversationId)?.status === "online" ? "在线" : "会话中"}</span>
+            </div>
+          </header>
+
+          <main className="chat-message-list">
+            {visibleMessages.map((message) => {
+              const isSelf = message.senderDeviceId === deviceId;
+              return (
+                <div key={message.id} className={`chat-row ${isSelf ? "self" : "peer"}`}>
+                  {!isSelf && (
+                    <div className="message-avatar">
+                      {avatarText(activeConversation ? agentMap.get(activeConversation.conversationId)?.name ?? activeConversation.title : "A")}
+                    </div>
+                  )}
+                  <div className={`message-bubble ${isSelf ? "self" : "peer"}`}>
+                    {renderMessageBody(message, setPreview)}
+                  </div>
+                </div>
+              );
+            })}
+            {activeConversationId && visibleMessages.length === 0 && <div className="empty-hint chat-empty">这个会话里还没有消息</div>}
+            <div ref={messageEndRef}></div>
+          </main>
+
+          <footer className="qq-composer">
+            <div className="composer-main">
+              <button type="button" className="composer-tool" onClick={() => setShowAttachmentPanel((current) => !current)}>
+                +
               </button>
-            ))}
-        </section>
+              <button
+                type="button"
+                className="composer-tool slash-tool"
+                disabled={!activeConversationId}
+                onClick={() => {
+                  setShowAttachmentPanel(false);
+                  setShowCommandPanel((current) => !current);
+                }}
+              >
+                /
+              </button>
+              <textarea
+                value={text}
+                onChange={(event) => {
+                  setText(event.target.value);
+                  setShowCommandPanel(event.target.value.trimStart().startsWith("/"));
+                }}
+                placeholder={activeConversationId ? "输入消息" : "先选择一个会话"}
+                disabled={!activeConversationId}
+              />
+              <button
+                type="button"
+                className="send-button"
+                disabled={!activeConversationId}
+                onClick={() => {
+                  void sendTextMessage(text);
+                }}
+              >
+                发送
+              </button>
+            </div>
 
-        <section className="conversation-panel">
-          <div className="conversation-title">{activeConversation?.title ?? "选择一个会话"}</div>
-          <div className="mobile-messages">
-            {visibleMessages.map((message) => (
-              <div key={message.id} className={`bubble ${message.senderDeviceId === deviceId ? "self" : "peer"}`}>
-                {renderMessageBody(message)}
-                <small>{message.status}</small>
+            {showCommandPanel && slashSuggestions.length > 0 && (
+              <div className="command-panel">
+                <div className="command-panel-title">可用指令</div>
+                {slashSuggestions.map((item) => (
+                  <button
+                    key={item.command}
+                    type="button"
+                    className="command-row"
+                    disabled={!activeConversationId}
+                    onClick={() => {
+                      setShowCommandPanel(false);
+                      void handleCommandQuickSend(item.command);
+                    }}
+                  >
+                    <div className="command-main">
+                      <strong>{item.command}</strong>
+                      <span>{item.label}</span>
+                    </div>
+                    <div className="command-desc">{item.description}</div>
+                  </button>
+                ))}
               </div>
-            ))}
-            {activeConversationId && visibleMessages.length === 0 && <div className="empty-hint">这个会话里还没有消息</div>}
-          </div>
-        </section>
-      </main>
+            )}
 
-      <footer className="mobile-composer">
-        <textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder={activeConversationId ? "输入消息" : "先选择一个会话"}
-          disabled={!activeConversationId}
-        />
-        <div className="mobile-actions">
-          <input
-            ref={filePickerRef}
-            type="file"
-            accept={attachmentPickerMap[pickerKind]}
-            className="hidden-picker"
-            onChange={handleAttachmentSelect}
-          />
-          <button
-            disabled={!activeConversationId}
-            onClick={() => {
-              if (!text.trim() || !activeConversationId) return;
-              void client.sendText(text.trim(), activeConversationId);
-              setText("");
-            }}
-          >
-            发送
-          </button>
-          <button disabled={!activeConversationId} onTouchStart={startRecording} onTouchEnd={stopRecording}>
-            {recording ? "松开发送" : "按住录音"}
-          </button>
-          <button
-            disabled={!activeConversationId}
-            onClick={() => {
-              setPickerKind("image");
-              filePickerRef.current?.click();
-            }}
-          >
-            图片
-          </button>
-          <button
-            disabled={!activeConversationId}
-            onClick={() => {
-              setPickerKind("video");
-              filePickerRef.current?.click();
-            }}
-          >
-            视频
-          </button>
-          <button
-            disabled={!activeConversationId}
-            onClick={() => {
-              setPickerKind("audio");
-              filePickerRef.current?.click();
-            }}
-          >
-            音频
-          </button>
-          <button
-            disabled={!activeConversationId}
-            onClick={() => {
-              setPickerKind("file");
-              filePickerRef.current?.click();
-            }}
-          >
-            文件
-          </button>
-        </div>
-      </footer>
+            {showAttachmentPanel && (
+              <div className="attachment-panel">
+                <input
+                  ref={filePickerRef}
+                  type="file"
+                  accept={attachmentPickerMap[pickerKind]}
+                  className="hidden-picker"
+                  onChange={handleAttachmentSelect}
+                />
+                <button
+                  type="button"
+                  className="attachment-tile"
+                  disabled={!activeConversationId}
+                  onTouchStart={startRecording}
+                  onTouchEnd={stopRecording}
+                  onTouchCancel={stopRecording}
+                >
+                  <strong>{recording ? "松开" : "语音"}</strong>
+                  <span>{recording ? "发送录音" : "按住录音"}</span>
+                </button>
+                <button
+                  type="button"
+                  className="attachment-tile"
+                  disabled={!activeConversationId}
+                  onClick={() => {
+                    setPickerKind("image");
+                    filePickerRef.current?.click();
+                  }}
+                >
+                  <strong>图片</strong>
+                  <span>发送照片</span>
+                </button>
+                <button
+                  type="button"
+                  className="attachment-tile"
+                  disabled={!activeConversationId}
+                  onClick={() => {
+                    setPickerKind("video");
+                    filePickerRef.current?.click();
+                  }}
+                >
+                  <strong>视频</strong>
+                  <span>发送视频</span>
+                </button>
+                <button
+                  type="button"
+                  className="attachment-tile"
+                  disabled={!activeConversationId}
+                  onClick={() => {
+                    setPickerKind("audio");
+                    filePickerRef.current?.click();
+                  }}
+                >
+                  <strong>音频</strong>
+                  <span>发送音频</span>
+                </button>
+                <button
+                  type="button"
+                  className="attachment-tile"
+                  disabled={!activeConversationId}
+                  onClick={() => {
+                    setPickerKind("file");
+                    filePickerRef.current?.click();
+                  }}
+                >
+                  <strong>文件</strong>
+                  <span>发送文件</span>
+                </button>
+              </div>
+            )}
+          </footer>
+        </section>
+      )}
+
+      <PreviewModal preview={preview} onClose={() => setPreview(null)} />
     </div>
   );
 }

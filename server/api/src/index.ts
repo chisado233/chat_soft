@@ -209,6 +209,45 @@ app.get("/api/agents", async () => {
   };
 });
 
+app.delete<{
+  Params: { agentId: string };
+  Querystring: { purge?: string };
+}>("/api/agents/:agentId", async (request, reply) => {
+  const db = loadDb();
+  const agentId = request.params.agentId;
+  const agent = db.agents.find((item) => item.agentId === agentId);
+  if (!agent) {
+    return reply.code(404).send({ message: "Agent 不存在" });
+  }
+
+  const purge = request.query.purge !== "0";
+  db.agents = db.agents.filter((item) => item.agentId !== agentId);
+
+  if (purge) {
+    db.messages = db.messages.filter((message) => message.conversationId !== agent.conversationId);
+    db.conversations = db.conversations.filter((conversation) => conversation.conversationId !== agent.conversationId);
+  } else {
+    const conversation = db.conversations.find((item) => item.conversationId === agent.conversationId);
+    if (conversation) {
+      delete conversation.agentId;
+      conversation.title = conversation.title || agent.name;
+      conversation.type = "direct";
+    }
+  }
+
+  const isDeviceStillUsed = db.agents.some((item) => item.agentDeviceId === agent.agentDeviceId);
+  if (!isDeviceStillUsed) {
+    db.devices = db.devices.filter((device) => device.deviceId !== agent.agentDeviceId);
+  }
+
+  saveDb(db);
+  return {
+    ok: true,
+    removedAgentId: agentId,
+    purge
+  };
+});
+
 app.post<{
   Body: {
     agentId?: string;

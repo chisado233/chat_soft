@@ -26,6 +26,27 @@ export interface ChatClientOptions {
 
 export interface UploadedAttachment extends AttachmentPayload {}
 
+function resolveMediaUrl(serverBaseUrl: string, mediaUrl: string) {
+  if (!mediaUrl) return mediaUrl;
+  if (/^https?:\/\//i.test(mediaUrl)) return mediaUrl;
+  return `${serverBaseUrl.replace(/\/$/, "")}${mediaUrl.startsWith("/") ? "" : "/"}${mediaUrl}`;
+}
+
+function normalizeMessage(serverBaseUrl: string, message: ChatMessage): ChatMessage {
+  if ("mediaUrl" in message && typeof message.mediaUrl === "string") {
+    const thumbnailUrl =
+      "thumbnailUrl" in message && typeof message.thumbnailUrl === "string"
+        ? resolveMediaUrl(serverBaseUrl, message.thumbnailUrl)
+        : undefined;
+    return {
+      ...message,
+      mediaUrl: resolveMediaUrl(serverBaseUrl, message.mediaUrl),
+      ...(thumbnailUrl ? { thumbnailUrl } : {})
+    } as ChatMessage;
+  }
+  return message;
+}
+
 export class ChatClient {
   private socket: WebSocket | null = null;
   private messages: ChatMessage[] = [];
@@ -106,7 +127,10 @@ export class ChatClient {
       durationMs: number;
       mimeType: string;
     };
-    return payload;
+    return {
+      ...payload,
+      mediaUrl: resolveMediaUrl(this.options.serverBaseUrl, payload.mediaUrl)
+    };
   }
 
   async uploadAttachment(file: File | Blob, kind: "audio" | "image" | "video" | "file", fileName?: string) {
@@ -121,7 +145,14 @@ export class ChatClient {
     if (!response.ok) {
       throw new Error("上传附件失败");
     }
-    return (await response.json()) as UploadedAttachment;
+    const payload = (await response.json()) as UploadedAttachment;
+    return {
+      ...payload,
+      mediaUrl: resolveMediaUrl(this.options.serverBaseUrl, payload.mediaUrl),
+      thumbnailUrl: payload.thumbnailUrl
+        ? resolveMediaUrl(this.options.serverBaseUrl, payload.thumbnailUrl)
+        : payload.thumbnailUrl
+    };
   }
 
   async listAgents() {
@@ -137,7 +168,15 @@ export class ChatClient {
     if (!response.ok) {
       throw new Error("获取会话列表失败");
     }
-    return (await response.json()) as { conversations: ConversationSummary[] };
+    const payload = (await response.json()) as { conversations: ConversationSummary[] };
+    return {
+      conversations: payload.conversations.map((conversation) => ({
+        ...conversation,
+        lastMessage: conversation.lastMessage
+          ? normalizeMessage(this.options.serverBaseUrl, conversation.lastMessage)
+          : conversation.lastMessage
+      }))
+    };
   }
 
   async fetchConversationMessages(conversationId: string) {
@@ -146,7 +185,9 @@ export class ChatClient {
       throw new Error("获取会话消息失败");
     }
     const payload = (await response.json()) as { messages: ChatMessage[] };
-    return payload.messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return payload.messages
+      .map((message) => normalizeMessage(this.options.serverBaseUrl, message))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   async sendText(text: string, conversationId = DEFAULT_CONVERSATION_ID) {
@@ -243,13 +284,17 @@ export class ChatClient {
 
   private handleServerEvent(event: ServerToClientEvent) {
     if (event.type === "sync.batch") {
-      this.messages = event.messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      this.messages = event.messages
+        .map((message) => normalizeMessage(this.options.serverBaseUrl, message))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       this.emitMessages();
     }
     if (event.type === "message.created") {
       const has = this.messages.some((message) => message.id === event.message.id);
       if (!has) {
-        this.messages = [...this.messages, event.message].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        this.messages = [...this.messages, normalizeMessage(this.options.serverBaseUrl, event.message)].sort((a, b) =>
+          a.createdAt.localeCompare(b.createdAt)
+        );
         this.emitMessages();
       }
     }
@@ -279,11 +324,12 @@ export class ChatClient {
     const response = await fetch(`${this.options.serverBaseUrl}/api/messages/recent${query}`);
     if (!response.ok) return;
     const payload = (await response.json()) as { messages: ChatMessage[] };
+    const normalizedMessages = payload.messages.map((message) => normalizeMessage(this.options.serverBaseUrl, message));
     if (conversationId) {
       const otherMessages = this.messages.filter((message) => message.conversationId !== conversationId);
-      this.messages = [...otherMessages, ...payload.messages].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      this.messages = [...otherMessages, ...normalizedMessages].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     } else {
-      this.messages = payload.messages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      this.messages = normalizedMessages.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     }
     this.emitMessages();
   }

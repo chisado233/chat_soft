@@ -6,6 +6,10 @@ dist-electron/
 server/api/data/
 apps/mobile/android/.gradle/
 apps/mobile/android/app/build/
+apps/mobile/android/app/build-alt/
 apps/mobile/android/build/
+.run/
+tools/**/node_modules/
+tools/**/*.vsix
 *.log
 image/
